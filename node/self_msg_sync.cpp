@@ -2,6 +2,7 @@
 #include <string>
 #include <sstream>
 #include <vector>
+#include <cmath>
 
 #include <ros/ros.h>
 #include "ros/param.h"
@@ -10,8 +11,9 @@
 #include <message_filters/sync_policies/approximate_time.h>
 #include <message_filters/sync_policies/exact_time.h>
 
+#include <yolov8_ros_msgs/BoundingBoxes.h>
 #include <sensor_msgs/Image.h>
-#include <std_msgs/Float32MultiArray.h>
+#include <std_msgs/Float64MultiArray.h>
 #include <state_estimation/Int32MultiArrayStamped.h>
 #include <cv_bridge/cv_bridge.h>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -29,20 +31,10 @@ private:
   ros::Publisher sync_yolo_pub;
   ros::Publisher sync_depth_pub;
   ros::Publisher sync_bbox_pub;
-  ros::Publisher sync_selfPose_pub;
-  ros::Publisher sync_selfVel_pub;
-  ros::Publisher sync_targetPose_pub;
-  ros::Publisher sync_targetVel_pub;
-  ros::Publisher sync_imu_pub;
 
   sensor_msgs::Image sync_img_yolo;
   sensor_msgs::Image sync_img_depth;
-  sensor_msgs::Imu sync_imu_data;
-  std_msgs::Float32MultiArray sync_bbox_msgs;
-  geometry_msgs::PoseStamped sync_selfPose;
-  geometry_msgs::TwistStamped sync_selfVel;
-  geometry_msgs::PoseStamped sync_targetPose;
-  geometry_msgs::TwistStamped sync_targetVel;
+  std_msgs::Float64MultiArray sync_bbox_msgs;
 
   string vehicle;
   string yolo_input_topic;
@@ -51,16 +43,6 @@ private:
   string depth_output_topic;
   string bbox_input_topic;
   string bbox_output_topic;
-  string self_pose_input_topic;
-  string self_pose_output_topic;
-  string self_vel_input_topic;
-  string self_vel_output_topic;
-  string targetPose_input_topic;
-  string targetPose_output_topic;
-  string targetVel_input_topic;
-  string targetVel_output_topic;
-  string self_imu_input_topic;
-  string self_imu_output_topic;
   
 
   int bbox_col;
@@ -68,68 +50,46 @@ private:
 
   void sync_cb(const sensor_msgs::ImageConstPtr& ori_yolo,
                const sensor_msgs::ImageConstPtr& ori_depth,
-               const state_estimation::Int32MultiArrayStamped::ConstPtr& ori_bbox,
-               const geometry_msgs::PoseStamped::ConstPtr& ori_selfPose,
-               const geometry_msgs::TwistStamped::ConstPtr& ori_selfVel,
-               const geometry_msgs::PoseStamped::ConstPtr& ori_targetPose,
-               const geometry_msgs::TwistStamped::ConstPtr& ori_targetVel,
-               const sensor_msgs::Imu::ConstPtr& ori_imuData);
+               const yolov8_ros_msgs::BoundingBoxes::ConstPtr& ori_bbox);
 
 public:
-  Image_process(ros::NodeHandle &nh, string group_ns);
+  Image_process(ros::NodeHandle &nh, string group_ns, int ID);
   ~Image_process();
 
-  float getDepth(int u, int v);
-  void set_topic(string group_ns);
+  double getDepth(int u, int v);
+  void set_topic(string group_ns, int ID);
   void set_bbox_col(int col);
-  void reArrangeBbox(state_estimation::Int32MultiArrayStamped bbox_msgs);
+  void reArrangeBbox(yolov8_ros_msgs::BoundingBoxes bbox_msgs);
 };
 
-Image_process::Image_process(ros::NodeHandle &nh, string group_ns)
+Image_process::Image_process(ros::NodeHandle &nh, string group_ns, int ID)
 {
   start = false;
   vehicle = group_ns;
-  set_topic(group_ns);
+  set_topic(group_ns, ID);
 
   sync_yolo_pub = nh.advertise<sensor_msgs::Image>(yolo_output_topic, 1);
   sync_depth_pub = nh.advertise<sensor_msgs::Image>(depth_output_topic, 1);
-  sync_bbox_pub = nh.advertise<std_msgs::Float32MultiArray>(bbox_output_topic, 1);
-  sync_selfPose_pub = nh.advertise<geometry_msgs::PoseStamped>(self_pose_output_topic, 1);
-  sync_selfVel_pub = nh.advertise<geometry_msgs::TwistStamped>(self_vel_output_topic, 1);
-  sync_targetPose_pub = nh.advertise<geometry_msgs::PoseStamped>(targetPose_output_topic, 1);
-  sync_targetVel_pub = nh.advertise<geometry_msgs::TwistStamped>(targetVel_output_topic, 1);
-  sync_imu_pub = nh.advertise<sensor_msgs::Imu>(self_imu_output_topic, 1);
-
+  sync_bbox_pub = nh.advertise<std_msgs::Float64MultiArray>(bbox_output_topic, 1);
 
   message_filters::Subscriber<sensor_msgs::Image> img_yolo_sub(nh, yolo_input_topic, 1);
   message_filters::Subscriber<sensor_msgs::Image> img_depth_sub(nh, depth_input_topic, 1);
-  message_filters::Subscriber<state_estimation::Int32MultiArrayStamped> bbox_msg_sub(nh, bbox_input_topic, 1);
-  message_filters::Subscriber<geometry_msgs::PoseStamped> self_pose_sub(nh, self_pose_input_topic, 1);
-  message_filters::Subscriber<geometry_msgs::TwistStamped> self_vel_sub(nh, self_vel_input_topic, 1);
-  message_filters::Subscriber<geometry_msgs::PoseStamped> target_pose_sub(nh, targetPose_input_topic, 1);
-  message_filters::Subscriber<geometry_msgs::TwistStamped> target_vel_sub(nh, targetVel_input_topic, 1);
-  message_filters::Subscriber<sensor_msgs::Imu> self_imu_sub(nh, self_imu_input_topic, 1);
+  message_filters::Subscriber<yolov8_ros_msgs::BoundingBoxes> bbox_msg_sub(nh, bbox_input_topic, 1);
 
 
   typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image,
                                                           sensor_msgs::Image,
-                                                          state_estimation::Int32MultiArrayStamped,
-                                                          geometry_msgs::PoseStamped,
-                                                          geometry_msgs::TwistStamped,
-                                                          geometry_msgs::PoseStamped,
-                                                          geometry_msgs::TwistStamped,
-                                                          sensor_msgs::Imu> MySyncPolicy;
+                                                          yolov8_ros_msgs::BoundingBoxes> MySyncPolicy;
 
   message_filters::Synchronizer<MySyncPolicy> sync(MySyncPolicy(100), 
                                                    img_yolo_sub,
                                                    img_depth_sub,
-                                                   bbox_msg_sub,
-                                                   self_pose_sub,
-                                                   self_vel_sub,
-                                                   target_pose_sub,
-                                                   target_vel_sub,
-                                                   self_imu_sub);
-  sync.registerCallback(boost::bind(&Image_process::sync_cb, this, _1, _2, _3, _4, _5, _6, _7, _8));
+                                                   bbox_msg_sub);
+  // sync.reset(new sync(MySyncPolicy(100), 
+  //                                                  img_yolo_sub,
+  //                                                  img_depth_sub,
+  //                                                  bbox_msg_sub));                                                   
+  sync.registerCallback(boost::bind(&Image_process::sync_cb, this, _1, _2, _3));
 
   bbox_col = 5;
 
@@ -140,12 +100,7 @@ Image_process::~Image_process(){}
 
 void Image_process::sync_cb(const sensor_msgs::ImageConstPtr& ori_yolo, 
                             const sensor_msgs::ImageConstPtr& ori_depth,
-                            const state_estimation::Int32MultiArrayStamped::ConstPtr& ori_bbox,
-                            const geometry_msgs::PoseStamped::ConstPtr& ori_selfPose,
-                            const geometry_msgs::TwistStamped::ConstPtr& ori_selfVel,
-                            const geometry_msgs::PoseStamped::ConstPtr& ori_targetPose,
-                            const geometry_msgs::TwistStamped::ConstPtr& ori_targetVel,
-                            const sensor_msgs::Imu::ConstPtr& ori_imuData)
+                            const yolov8_ros_msgs::BoundingBoxes::ConstPtr& ori_bbox)
 {
   if(!start)
   {
@@ -155,119 +110,94 @@ void Image_process::sync_cb(const sensor_msgs::ImageConstPtr& ori_yolo,
 
   sync_img_yolo = *ori_yolo;
   sync_img_depth = *ori_depth;
-  reArrangeBbox(*ori_bbox);
-  sync_selfPose = *ori_selfPose;
-  sync_selfVel = *ori_selfVel;
-  sync_targetPose = *ori_targetPose;
-  sync_targetVel = *ori_targetVel;
-  sync_imu_data = *ori_imuData;
-
-  /*
-  ROS_INFO("%s image_yolo stamp value is: %f", vehicle.c_str(), sync_img_yolo.header.stamp.toSec());
-  ROS_INFO("%s image_depth stamp value is: %f", vehicle.c_str(), sync_img_depth.header.stamp.toSec());
-  ROS_INFO("%s bbox_msg stamp value is: %f", vehicle.c_str(), sync_bbox_msgs.header.stamp.toSec());
-  */
+  reArrangeBbox(*ori_bbox);  
 
   sync_yolo_pub.publish(sync_img_yolo);
   sync_depth_pub.publish(sync_img_depth);
   sync_bbox_pub.publish(sync_bbox_msgs);
-  sync_selfPose_pub.publish(sync_selfPose);
-  sync_selfVel_pub.publish(sync_selfVel);
-  sync_targetPose_pub.publish(sync_targetPose);
-  sync_targetVel_pub.publish(sync_targetVel);
-  sync_imu_pub.publish(sync_imu_data);
 }
 
-void Image_process::reArrangeBbox(state_estimation::Int32MultiArrayStamped bbox_msgs)
+void Image_process::reArrangeBbox(yolov8_ros_msgs::BoundingBoxes bbox_msgs)
 {
-  float u, v;
-  vector<int> bbox_data = bbox_msgs.data;
-  vector<float> reArrangeBbox_data;
+  double u, v;
+  vector<int> bbox_data;
+  if ( !bbox_msgs.bounding_boxes.empty())
+  {
+    bbox_data.push_back(bbox_msgs.bounding_boxes[0].xmin);
+    bbox_data.push_back(bbox_msgs.bounding_boxes[0].ymin);
+    bbox_data.push_back(bbox_msgs.bounding_boxes[0].xmax);
+    bbox_data.push_back(bbox_msgs.bounding_boxes[0].ymax);
+  }
+  vector<double> reArrangeBbox_data;
 
-  if(bbox_data.size() > 0)
+  float depth = 0;
+  if( !bbox_data.empty())
   {
     for(int i = 0; i <bbox_data.size(); i+=bbox_col)
     {
-      u = (float)(bbox_data[i+1] + bbox_data[i+3])/2;
-      v = (float)(bbox_data[i+2] + bbox_data[i+4])/2;
+      u = (double)(bbox_data[i] + bbox_data[i+2])/2;
+      v = (double)(bbox_data[i+1] + bbox_data[i+3])/2;
       reArrangeBbox_data.push_back(u);
       reArrangeBbox_data.push_back(v);
-      reArrangeBbox_data.push_back(getDepth((int)u, (int)v));
+      depth = getDepth((int)u, (int)v);
+      if(isnan(depth))
+        reArrangeBbox_data.clear();  
+      else
+        reArrangeBbox_data.push_back(depth);
     }
     sync_bbox_msgs.data = reArrangeBbox_data;
   }
 }
 
-float Image_process::getDepth(int u, int v)
+double Image_process::getDepth(int u, int v)
 {
   float depth = 0;
+  int n = 0;
   cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(sync_img_depth, sensor_msgs::image_encodings::TYPE_32FC1);
+  if (u >= 0 && u < cv_ptr->image.cols && v >= 0 && v < cv_ptr->image.rows) {
+    depth = cv_ptr->image.at<float>(v, u); // Access depth value at (u, v)
+  } 
   
-  depth += cv_ptr->image.at<float>(v, u);
-  depth += cv_ptr->image.at<float>(v+1, u);
-  depth += cv_ptr->image.at<float>(v-1, u);
-  depth += cv_ptr->image.at<float>(v, u+1);
-  depth += cv_ptr->image.at<float>(v, u-1);
-  depth /=5;
-
   return depth;
 }
 
-void Image_process::set_topic(string group_ns)
+void Image_process::set_topic(string group_ns, int ID)
 {
 
-  string prefix = string("/")+group_ns;
+  string prefix = string("/")+ group_ns + to_string(ID);
 
-  yolo_input_topic = prefix + string("/yolov7/yolov7/visualization");
+  yolo_input_topic = prefix + string("/yolov8/detection_image");
   depth_input_topic = prefix + string("/camera/depth/image_raw");
-  bbox_input_topic = prefix + string("/yolov7/yolov7/boundingBox");
-  self_pose_input_topic = prefix + string("/mavros/local_position/pose_initialized");
-  self_vel_input_topic = prefix + string("/mavros/local_position/velocity_local");
-  targetPose_input_topic = string("/target/mavros/local_position/pose_initialized");
-  targetVel_input_topic = string("/target/mavros/local_position/velocity_local");
-  self_imu_input_topic = prefix + string("/mavros/imu/data");
+  bbox_input_topic = prefix + string("/yolov8/BoundingBox");
 
   cout << "[" << group_ns << " Message_synchronizer]: Input topic was set:\n"
                           << yolo_input_topic << endl 
                           << depth_input_topic << endl
                           << bbox_input_topic << endl
-                          << self_pose_input_topic << endl
-                          << self_vel_input_topic << endl
-                          << targetPose_input_topic << endl
-                          << self_imu_input_topic << endl
                           << "==============================================\n";
 
-  yolo_output_topic = prefix + string("/synchronizer/yolov7/visualization");
+  yolo_output_topic = prefix + string("/synchronizer/yolov8/visualization");
   depth_output_topic = prefix + string("/synchronizer/camera/depth/image_raw");
-  bbox_output_topic = prefix + string("/synchronizer/yolov7/boundingBox");
-  self_pose_output_topic = prefix + string("/synchronizer/local_position/pose_initialized");
-  self_vel_output_topic = prefix + string("/synchronizer/local_position/velocity_local");
-  targetPose_output_topic = string("/target/synchronizer/local_position/pose_initialized");
-  targetVel_output_topic = string("/target/synchronizer/local_position/velocity_local");
-  self_imu_output_topic = prefix + string("/synchronizer/imu/data");
+  bbox_output_topic = prefix + string("/synchronizer/yolov8/boundingBox");
 
   cout << "[" << group_ns << " Message_synchronizer]: Output topic was set:\n"
                           << yolo_output_topic << endl 
                           << depth_output_topic << endl
                           << bbox_output_topic << endl
-                          << self_pose_output_topic << endl
-                          << self_vel_output_topic << endl
-                          << targetVel_output_topic << endl
-                          << self_imu_output_topic << endl
                           << "===================================================================================================\n\n";
 }
-
-void Image_process::set_bbox_col(int col){bbox_col = col;}
 
 int main(int argc, char** argv)
 {
   ros::init(argc, argv, "msg_synchronizer");
   ros::NodeHandle nh;
 
-  string group_ns;
-  ros::param::get("vehicle", group_ns);
-
-  Image_process process(nh, group_ns);
+  string vehicle;
+  int ID = 0;
+  ros::param::get("vehicle", vehicle);
+  ros::param::get("ID", ID);
+  // std::cout << "work out \n\n";
+  Image_process process(nh, vehicle, ID);
   
   return 0;
 }

@@ -1,9 +1,8 @@
 Header header
-float32[] predInfoMat
-float32[] predInfoVec
-float32[] corrInfoMat
-float32[] corrInfoVec
-float32[] fusedInfoMat 
-float32[] fusedInfoVec
 int32 stateSize
 int32 id
+float64[] P_hat
+float64[] X_hat
+float64[] s
+float64[] y
+

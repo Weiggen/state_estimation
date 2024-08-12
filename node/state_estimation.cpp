@@ -1,337 +1,270 @@
 #include <string>
 #include <sstream>
 #include <vector>
+#include <cctype>
+#include <cmath>
+#include <random>
+#include <algorithm>
 
 #include <Eigen/Dense>
+#include <Eigen/Core>
+#include <Eigen/SVD>  
 #include <ros/ros.h>
 #include "ros/param.h"
-#include <std_msgs/Float32MultiArray.h>
+#include <std_msgs/Float64MultiArray.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/TwistStamped.h>
 #include <std_msgs/Header.h>
+#include <std_msgs/Bool.h>
 #include <state_estimation/EIFpairStamped.h>
-#include <state_estimation/RMSE.h>
-#include <sensor_msgs/Imu.h>
+#include <state_estimation/Plot.h>
 #include <geometry_msgs/Quaternion.h>
 #include <geometry_msgs/Vector3.h>
+#include <gazebo_msgs/ModelStates.h>
 
-#include "EIF.h"
+#include "Mav.h"
+#include "TEIF_Lidar.h"
+#include "TEIF.h"
+#include "HEIF_self.h"
+#include "HEIF_target.h"
+#include "SEIF_pose.h"
+#include "SEIF_neighbors.h"
+#include "SEIF_lidar_neighbors.h"
+#include "GT_measurement_ros.h"
+#include "EIFpairs_ros.h"
+#include "Camera.h"
 
-
-class Data_process
-{
-private:
-	ros::Subscriber bboxes_sub;
-	ros::Subscriber self_pose_sub;
-	ros::Subscriber self_vel_sub;
-	ros::Subscriber targetPose_sub;
-	ros::Subscriber targetVel_sub;
-	ros::Subscriber fusedPair_sub;
-	ros::Subscriber self_imu_sub;
-
-	std::string bbox_topic;
-	std::string self_pose_topic;
-	std::string self_vel_topic;
-	std::string targetPose_topic;
-	std::string targetVel_topic;
-	std::string targetPose_EIF_topic;
-	std::string targetVel_EIF_topic;
-	std::string targetPose_EIF_err_topic;
-	std::string EIFpairs_topic;
-	std::string self_imu_topic;
-	std::string RMSE_topic;
-
-	int state_size;
-public:
-	Data_process(ros::NodeHandle &nh, std::string group_ns, int stateSize);
-	~Data_process();
-
-	ros::Publisher targetPose_EIF_pub;
-	ros::Publisher targetVel_EIF_pub;
-	ros::Publisher targetPose_EIF_err_pub;
-	ros::Publisher EIFpairs_pub;
-	ros::Publisher RMSE_pub;
-
-	geometry_msgs::PoseStamped self_pose;
-	geometry_msgs::TwistStamped self_vel;
-	Eigen::VectorXd self_acc;
-	std_msgs::Header sync_header;
-	state_estimation::EIFpairStamped fusedPair;
-	Eigen::MatrixXd fusedOmega;
-	Eigen::VectorXd fusedXi;
-
-	Eigen::VectorXd targetState_GT;
-	std::vector<float> bboxes;
-	bool gotBbox;
-	bool gotSelfPose;
-	bool gotSelfVel;
-	bool gotSelfImu;
-	bool gotFusedPair;
-
-	void bboxes_cb(const std_msgs::Float32MultiArray::ConstPtr& msg);
-	void self_pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg);
-	void self_vel_cb(const geometry_msgs::TwistStamped::ConstPtr& msg);
-	void self_imu_cb(const sensor_msgs::Imu::ConstPtr& msg);
-	void targetPose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg);
-	void targetVel_cb(const geometry_msgs::TwistStamped::ConstPtr& msg);
-	void fusedPair_cb(const state_estimation::EIFpairStamped::ConstPtr& msg);
-
-	void set_topic(std::string group_ns);
-	void compare(Eigen::VectorXd X_t);
-
-};
-
-Data_process::Data_process(ros::NodeHandle &nh, std::string group_ns, int stateSize)
-{
-	gotBbox = gotSelfPose = gotSelfVel = gotSelfImu = false;
-	set_topic(group_ns);
-	state_size = stateSize;
-
-	bboxes_sub = nh.subscribe<std_msgs::Float32MultiArray>(bbox_topic, 2, &Data_process::bboxes_cb, this);
-	self_pose_sub = nh.subscribe<geometry_msgs::PoseStamped>(self_pose_topic, 2, &Data_process::self_pose_cb, this);
-	self_vel_sub = nh.subscribe<geometry_msgs::TwistStamped>(self_vel_topic, 2, &Data_process::self_vel_cb, this);
-	targetPose_sub = nh.subscribe<geometry_msgs::PoseStamped>(targetPose_topic, 2, &Data_process::targetPose_cb, this);
-	targetVel_sub = nh.subscribe<geometry_msgs::TwistStamped>(targetVel_topic, 2, &Data_process::targetVel_cb, this);
-	fusedPair_sub = nh.subscribe<state_estimation::EIFpairStamped>("/HEIF/fusedPair", 2, &Data_process::fusedPair_cb, this);
-	self_imu_sub = nh.subscribe<sensor_msgs::Imu>(self_imu_topic, 2, &Data_process::self_imu_cb, this);
-
-	targetPose_EIF_pub = nh.advertise<geometry_msgs::PoseStamped>(targetPose_EIF_topic, 1);
-	targetVel_EIF_pub = nh.advertise<geometry_msgs::TwistStamped>(targetVel_EIF_topic, 1);
-	targetPose_EIF_err_pub = nh.advertise<geometry_msgs::PoseStamped>(targetPose_EIF_err_topic, 1);
-	RMSE_pub = nh.advertise<state_estimation::RMSE>(RMSE_topic, 1);
-
-	EIFpairs_pub = nh.advertise<state_estimation::EIFpairStamped>(EIFpairs_topic, 1);
-
-	targetState_GT.resize(state_size);
-	gotFusedPair = false;
-
-	fusedXi.setZero(stateSize);
-	fusedOmega.setIdentity(state_size, state_size);
-}
-
-Data_process::~Data_process(){};
-
-void Data_process::set_topic(std::string group_ns)
-{
-	bbox_topic = std::string("/") + group_ns + std::string("/synchronizer/yolov7/boundingBox");
-	self_pose_topic = std::string("/") + group_ns + std::string("/synchronizer/local_position/pose_initialized");
-	self_vel_topic = std::string("/") + group_ns + std::string("/synchronizer/local_position/velocity_local");
-	targetPose_topic = std::string("/target/synchronizer/local_position/pose_initialized");
-	targetVel_topic = std::string("/target/synchronizer/local_position/velocity_local");
-	targetPose_EIF_topic = std::string("/") + group_ns + std::string("/EIF/pose");
-	targetVel_EIF_topic = std::string("/") + group_ns + std::string("/EIF/vel");
-	targetPose_EIF_err_topic = std::string("/") + group_ns + std::string("/EIF/pose_err");
-	EIFpairs_topic = std::string("/") + group_ns + std::string("/EIF/fusionPairs");
-	self_imu_topic = std::string("/") + group_ns + std::string("/synchronizer/imu/data");
-	RMSE_topic = std::string("/") + group_ns + std::string("/EIF/RMSE");
-}
-
-void Data_process::bboxes_cb(const std_msgs::Float32MultiArray::ConstPtr& msg)
-{
-	if(!gotBbox)
-		gotBbox = true;
-	bboxes = msg->data;
-}
-
-void Data_process::self_pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg)
-{
-	if(!gotSelfPose)
-		gotSelfPose = true;
-	sync_header = msg->header;
-	self_pose = *msg;
-}
-
-void Data_process::self_vel_cb(const geometry_msgs::TwistStamped::ConstPtr& msg)
-{
-	if(!gotSelfVel)
-		gotSelfVel = true;
-	self_vel = *msg;
-}
-
-void Data_process::self_imu_cb(const sensor_msgs::Imu::ConstPtr& msg)
-{
-	if(!gotSelfImu)
-		gotSelfImu = true;
-
-	Eigen::Quaterniond q(msg->orientation.w, msg->orientation.x, msg->orientation.y, msg->orientation.z);
-	Eigen::VectorXd acc_b(3);
-	acc_b << msg->linear_acceleration.x, msg->linear_acceleration.y, msg->linear_acceleration.z;
-	self_acc = q*acc_b;
-	self_acc(2) = self_acc(2) - 9.81;
-
-	//std::cout << "self_acc:\n" << self_acc << std::endl;
-}
-
-void Data_process::targetPose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg)
-{
-	targetState_GT(0) = msg->pose.position.x;
-	targetState_GT(1) = msg->pose.position.y;
-	targetState_GT(2) = msg->pose.position.z;
-}
-
-void Data_process::targetVel_cb(const geometry_msgs::TwistStamped::ConstPtr& msg)
-{
-	targetState_GT(3) = msg->twist.linear.x;
-	targetState_GT(4) = msg->twist.linear.y;
-	targetState_GT(5) = msg->twist.linear.z;
-}
-
-void getFusionPairs(EIF eif, state_estimation::EIFpairStamped& EIFpairs)
-{
-	Eigen::MatrixXd predInfoMat, corrInfoMat;
-	Eigen::VectorXd predInfoVec, corrInfoVec;
-
-	eif.getPredictionPairs(&predInfoMat, &predInfoVec);
-	eif.getCorrectionPairs(&corrInfoMat, &corrInfoVec);
-
-	std::vector<float> predInfoMat_vec(predInfoMat.data(), predInfoMat.data() + predInfoMat.size());
-	std::vector<float> predInfoVec_vec(predInfoVec.data(), predInfoVec.data() + predInfoVec.size());
-	std::vector<float> corrInfoMat_vec(corrInfoMat.data(), corrInfoMat.data() + corrInfoMat.size());
-	std::vector<float> corrInfoVec_vec(corrInfoVec.data(), corrInfoVec.data() + corrInfoVec.size());
-
-	EIFpairs.predInfoMat = predInfoMat_vec;
-	EIFpairs.predInfoVec = predInfoVec_vec;
-	EIFpairs.corrInfoMat = corrInfoMat_vec;
-	EIFpairs.corrInfoVec = corrInfoVec_vec;
-}
-
-void Data_process::fusedPair_cb(const state_estimation::EIFpairStamped::ConstPtr& msg)
-{
-	if(!gotFusedPair)
-		gotFusedPair = true;
-	fusedPair = *msg;
-	Eigen::Map<Eigen::MatrixXf> fusedInfoMat(fusedPair.fusedInfoMat.data(), state_size, state_size);
-	fusedOmega = fusedInfoMat.cast<double>();
-	Eigen::Map<Eigen::VectorXf> fusedInfoVec(fusedPair.fusedInfoVec.data(), state_size);
-	fusedXi = fusedInfoVec.cast<double>();
-}
-
-void Data_process::compare(Eigen::VectorXd X_t)
-{
-	Eigen::VectorXd E = targetState_GT - X_t;
-	Eigen::VectorXd E_p(3), E_v(3);
-	state_estimation::RMSE RMSE_data;
-	E_p << E(0), E(1), E(2);
-	E_v << E(3), E(4), E(5);
-
-	std::cout << "X_t: \n" << X_t << "\n\n";
-	std::cout << "RMS_p: " << E_p.norm() << "\nRMS_v: " << E_v.norm() << "\n\n";
-
-	
-	RMSE_data.header = sync_header;
-	RMSE_data.RMSE_p = E_p.norm();
-	RMSE_data.RMSE_v = E_v.norm();
-	RMSE_pub.publish(RMSE_data);
-}
-
-int extractUAVID(std::string vehicle)
-{
-	int last_digit_index = -1;
-	int last_digit = -1;
-    for (int i = vehicle.length() - 1; i >= 0; i--) {
-        if (std::isdigit(vehicle[i])) {
-            last_digit_index = i;
-            break;
-        }
-    }
-
-    // Check if a digit was found and extract it
-    if (last_digit_index != -1)
-    {
-    	last_digit = std::stoi(vehicle.substr(last_digit_index));
-    	return last_digit;
-    } 
-        
-    else
-    {
-    	std::cout << "No digit found in the string" << std::endl;
-    	return -1;
-    }
-}
-
+using namespace std;
 
 int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "state_estimation");
     ros::NodeHandle nh;
 
+	ros::Publisher mavros_fusionPose_pub = nh.advertise<geometry_msgs::PoseStamped>("mavros/vision_pose/pose", 10);
+	ros::Publisher mavros_fusionTwist_pub = nh.advertise<geometry_msgs::TwistStamped>("mavros/vision_pose/twist", 10);
+	ros::Publisher target_fusionPose_pub = nh.advertise<geometry_msgs::PoseStamped>("THEIF/pose", 10);
+	ros::Publisher target_fusionTwist_pub = nh.advertise<geometry_msgs::TwistStamped>("THEIF/twist", 10);
+	ros::Publisher isTargetEst_pub = nh.advertise<std_msgs::Bool>("THEIF/isTargetEst", 10);
+
     std::string vehicle;
-    bool consensus;
-    int state_size = 6;
-    int measurement_size = 3;
-    int hz;
-
-    ros::param::get("vehicle", vehicle);
-    ros::param::get("consensus", consensus);
-    ros::param::get("stateSize", state_size);
-    ros::param::get("rate", hz);
-;	int ID = extractUAVID(vehicle);
-	ros::Rate rate(hz);
-
+    bool consensus = false;
+	bool position_estimation = false;
+	int mavNum = 3;
+    int rosRate = 50;
+	int ID = 0;
+	int state_size = 6;
+	double targetTimeTol = 0.05;
 	double last_t;
 	double dt;
+    ros::param::get("vehicle", vehicle);
+	ros::param::get("ID", ID);
+    ros::param::get("rate", rosRate);
+	ros::param::get("consensus", consensus);
+	ros::param::get("stateSize", state_size);
+	ros::param::get("targetTimeTolerance", targetTimeTol);
+	ros::param::get("pos_est", position_estimation);
+	
+	ros::Rate rate(rosRate);
 
-	Eigen::VectorXd targetState_EIF;
-	geometry_msgs::PoseStamped targetPose_EIF;
-	geometry_msgs::TwistStamped targetVel_EIF;
-	geometry_msgs::PoseStamped targetPose_EIF_err;
-	state_estimation::EIFpairStamped EIFpairs;
+	geometry_msgs::PoseStamped self_fusedPoseMsg;
+	geometry_msgs::TwistStamped self_fusedTwistMsg;
+	geometry_msgs::PoseStamped target_fusedPoseMsg;
+	geometry_msgs::TwistStamped target_fusedTwistMsg;
 
-	Eigen::VectorXd measurement;
-	measurement.resize(measurement_size);
+	MAV mav(nh);
+	EIFpairs_ros eif_ros(nh, vehicle, ID, mavNum);
+	Camera cam(nh, true);
+	GT_measurement gt_m(nh, ID, 4);
+	gt_m.setRosRate(rosRate);
+	MAV_eigen mav_eigen;
 
-	Data_process dp(nh, vehicle, state_size);
-	printf("[%s EIF]: Fusion state size: %i \n", vehicle.c_str(), state_size);
-	printf("[%s EIF]: Fusion measurement size: %i \n\n", vehicle.c_str(), measurement_size);
+	
 
-	while(ros::ok() && (!dp.gotBbox || !dp.gotSelfPose || !dp.gotSelfVel || !dp.gotSelfImu))
+	while(ros::ok())
 	{
-		//printf("[%s]: Waiting for topics...\n", vehicle.c_str());
+		if(mav.imu_init)
+				break;
+		else
+			printf("[%s_%i]: Waiting for Imu topic...\n", vehicle.c_str(), ID);
+		rate.sleep();
 		ros::spinOnce();
 	}
-	printf("\n[%s EIF]: Topics all checked, start calculating EIF\n\n", vehicle.c_str());
+	printf("\n[%s_%i EIF]: Topic checked\n", vehicle.c_str(), ID);
+	for(int i=0; i< 20; i++)
+	{
+		rate.sleep();
+		ros::spinOnce();
+	}
+	
+	Self_pose_EIF SEIF_pose;
+	Self_rel_EIF SEIF_neighbors;
+	Self_lidar_EIF SEIF_lidar_neighbors;
+	target_EIF teif(6);
+	HEIF_self sheif(6);
+	HEIF_target theif(6);
 
-	EIF eif(state_size, measurement_size, consensus);
-	printf("\n[%s EIF]: EIF constructed\n\n", vehicle.c_str());
+	printf("\n[%s_%i EIF]: EIF constructed\n\n", vehicle.c_str(), ID);
 
+	SEIF_pose.setCurrState(gt_m.getGTs_eigen()[ID]);
+	if(position_estimation)
+	{
+		Eigen::MatrixXd Q(6, 6);
+		Q.block(0, 0, 3, 3) = 1e-3*Eigen::MatrixXd::Identity(3, 3); // position
+    	Q.block(3, 3, 3, 3) = 8e-2*Eigen::MatrixXd::Identity(3, 3); // velocity
+		SEIF_pose.set_process_noise(Q);
+	}
+	
+	dt = 0.001;
 	last_t = ros::Time::now().toSec();
 
+	std_msgs::Bool isTargetEst_msg;
+	
     while(ros::ok())
     {
-    	dt = ros::Time::now().toSec() - last_t;
+		mav.setOrientation(gt_m.getGTorientation(ID));
+		mav_eigen = mavMsg2Eigen(mav);
+		/*=================================================================================================================================
+			Prediction
+		=================================================================================================================================*/
+		// -------------------------------------Self-------------------------------------
+		SEIF_pose.setMavSelfData(mav_eigen);
+		if(position_estimation)
+			SEIF_pose.setMeasurement(gt_m.getPositionMeasurement());
+		SEIF_pose.computePredPairs(dt);
+		eif_ros.selfPredEIFpairs_pub.publish(eigen2EifMsg(SEIF_pose.getEIFData(), ID));
+		
+		SEIF_lidar_neighbors.setMavSelfData(mav_eigen);
+		SEIF_lidar_neighbors.setEIFpredData(SEIF_pose.getEIFData());
+		SEIF_lidar_neighbors.setLidarMeasurements(gt_m.getLidarMeasurements());
+		SEIF_lidar_neighbors.setNeighborData(eif_ros.get_curr_fusing_data(eif_ros.neighborsEIFpairs, 0.05));
+		// -------------------------------------Target-------------------------------------
+		gt_m.setCamera(cam);
+		teif.setCamera(cam);
+		teif.setMavSelfData(mav_eigen); 
+		teif.setMeasurement(gt_m.getCamera4target());
+		teif.setSEIFpredData(SEIF_pose.getEIFData());
+		teif.computePredPairs(dt);
+		// gt_m.bbox_check();
+		// if(gt_m.ifCameraMeasure())
+		// {
+		// 	if(!teif.filter_init)
+		// 		teif.setInitialState(gt_m.getBboxEigen());
+		// 	teif.setCamera(cam);
+		// 	teif.setMavSelfData(mav_eigen); 
+		// 	teif.setMeasurement(gt_m.getBboxEigen());
+		// 	teif.setSEIFpredData(SEIF_pose.getEIFData());
+		//  	teif.computePredPairs(dt);
+		// }
+
+		/*=================================================================================================================================
+			Correction
+		=================================================================================================================================*/
+		
+		// -------------------------------------Self-------------------------------------
+		SEIF_pose.computeCorrPairs();
+		SEIF_lidar_neighbors.computeCorrPairs();
+
+		// -------------------------------------Target-------------------------------------
+		// if(gt_m.ifCameraMeasure())
+		// {
+		 	teif.computeCorrPairs();
+			eif_ros.self2TgtEIFpairs_pub.publish(eigen2EifMsg(teif.getTgtData(), ID));
+		// }
+
+		/*=================================================================================================================================
+			Fusion
+		=================================================================================================================================*/
+		// -------------------------------------Self-------------------------------------
+		sheif.setSelfEstData(SEIF_pose.getEIFData());
+		sheif.setNeighborEstData(SEIF_lidar_neighbors.getEIFData());
+		sheif.process();
+		SEIF_pose.setFusionPairs(sheif.getFusedCov(), sheif.getFusedState());
+		
+		std::cout << "SEIF:\n";
+		eif_ros.selfState_Plot_pub.publish(compare(gt_m.getGTs_eigen()[ID], sheif.getFusedState() , sheif.getFusedCov(), gt_m.getGTorientation(ID)));
+		
+		// -------------------------------------Target-------------------------------------
+		std::vector<EIF_data> allTgtEIFData;
+		allTgtEIFData = eif_ros.get_curr_fusing_data(eif_ros.rbs2Tgt_EIFPairs, 0.05);
+		// if(gt_m.ifCameraMeasure())
+			allTgtEIFData.push_back(teif.getTgtData());
+		theif.setTargetEstData(allTgtEIFData);
+		theif.process();
+		// if(gt_m.ifCameraMeasure())
+		// {
+			teif.setFusionPairs(theif.getFusedCov(), theif.getFusedState(), ros::Time::now().toSec());
+			
+			// if(theif.QP_init(15, 2))
+			// {
+			// 	theif.QP_pushData(ros::Time::now().toSec(), theif.getFusedState().segment(0, 3));
+			// 	if(theif.computeQP());
+			// 		teif.setEstAcc(theif.getQpAcc());
+			// }
+		// }
+		std::cout << "TEIF:\n";
+		eif_ros.tgtState_Plot_pub.publish(compare(gt_m.getGTs_eigen()[0], theif.getFusedState() , theif.getFusedCov(), gt_m.getGTorientation(ID)));
+
+		// Eigen::MatrixXd est_p = theif.getFusedCov();
+
+		// Eigen::JacobiSVD <Eigen::MatrixXd>svd(est_p.inverse(), Eigen:: ComputeThinU | Eigen:: ComputeThinV) ;
+		// cout << "Its singular values are:" << endl << svd.singularValues() << endl;
+		// cout << "Its left singular vectors are the columns of the thin U matrix:" << endl << svd.matrixU() << endl;
+	
+		/*=================================================================================================================================
+			Publish to mavros for feedback
+		=================================================================================================================================*/
+		
+		// -------------------------------------Position-------------------------------------
+		self_fusedPoseMsg.header.frame_id = "/world";
+		self_fusedPoseMsg.header.stamp = ros::Time::now();
+		self_fusedPoseMsg.pose.position.x = sheif.getFusedState()(0);
+		self_fusedPoseMsg.pose.position.y = sheif.getFusedState()(1);
+		self_fusedPoseMsg.pose.position.z = sheif.getFusedState()(2);
+		self_fusedPoseMsg.pose.orientation.w = mav_eigen.q.w();
+		self_fusedPoseMsg.pose.orientation.x = mav_eigen.q.x();
+		self_fusedPoseMsg.pose.orientation.y = mav_eigen.q.y();
+		self_fusedPoseMsg.pose.orientation.z = mav_eigen.q.z();
+
+		target_fusedPoseMsg.header.frame_id = "/world";
+		target_fusedPoseMsg.header.stamp = ros::Time::now();
+		target_fusedPoseMsg.pose.position.x = theif.getFusedState()(0);
+		target_fusedPoseMsg.pose.position.y = theif.getFusedState()(1);
+		target_fusedPoseMsg.pose.position.z = theif.getFusedState()(2);
+
+		// -------------------------------------Velocity-------------------------------------
+		self_fusedTwistMsg.header.stamp = ros::Time::now();
+		self_fusedTwistMsg.twist.linear.x = sheif.getFusedState()(3);
+		self_fusedTwistMsg.twist.linear.y = sheif.getFusedState()(4);
+		self_fusedTwistMsg.twist.linear.z = sheif.getFusedState()(5);
+		self_fusedTwistMsg.twist.angular.x = mav_eigen.omega_c(0);
+		self_fusedTwistMsg.twist.angular.y = mav_eigen.omega_c(1);
+		self_fusedTwistMsg.twist.angular.z = mav_eigen.omega_c(2);
+
+		target_fusedTwistMsg.header.stamp = ros::Time::now();
+		target_fusedTwistMsg.twist.linear.x = theif.getFusedState()(3);
+		target_fusedTwistMsg.twist.linear.y = theif.getFusedState()(4);
+		target_fusedTwistMsg.twist.linear.z = theif.getFusedState()(5);
+
+		// -------------------------------------Camera detect?-------------------------------------
+		isTargetEst_msg.data = gt_m.ifCameraMeasure();
+		// -------------------------------------debug-----------------------------------------
+		// -------------------------------------Publish-------------------------------------
+		mavros_fusionPose_pub.publish(self_fusedPoseMsg);
+		mavros_fusionTwist_pub.publish(self_fusedTwistMsg);
+		target_fusionPose_pub.publish(target_fusedPoseMsg);
+		target_fusionTwist_pub.publish(target_fusedTwistMsg);
+		isTargetEst_pub.publish(isTargetEst_msg);
+
+		/*=================================================================================================================================
+			Descrete time
+		=================================================================================================================================*/
+		dt = ros::Time::now().toSec() - last_t;
     	last_t = ros::Time::now().toSec();
-
-    	if(state_size == 6)
-    		eif.setSelfState(dp.self_pose, dp.self_vel);
-    	else if(state_size == 9)
-    		eif.setSelfState(dp.self_pose, dp.self_vel, dp.self_acc);
-
-
-    	measurement << dp.bboxes[0], dp.bboxes[1], dp.bboxes[2];
-    	eif.process(dt, measurement, dp.fusedOmega, dp.fusedXi, dp.gotFusedPair);
-    	
-    	
-    	EIFpairs.header = dp.sync_header;
-    	EIFpairs.id = ID;
-    	EIFpairs.stateSize = state_size;
-    	getFusionPairs(eif, EIFpairs);
-    	if(consensus == true)
-    		dp.EIFpairs_pub.publish(EIFpairs);
-    	else
-    		dp.compare(eif.getTargetState());
-    	
-    	
-    	
-    	/*
-    	targetState_EIF = eif.getTargetState();
-    	targetPose_EIF_err.header = dp.sync_header;
-    	targetPose_EIF_err.pose.position.x = dp.targetState_GT(0) - targetState_EIF(0);
-    	targetPose_EIF_err.pose.position.y = dp.targetState_GT(1) - targetState_EIF(1);
-    	targetPose_EIF_err.pose.position.z = dp.targetState_GT(2) - targetState_EIF(2);
-    	dp.targetPose_EIF_err_pub.publish(targetPose_EIF_err);
-    	*/
-
-
+		
+		rate.sleep();
     	ros::spinOnce();
     }
+	
+	return 0;
 }

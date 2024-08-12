@@ -11,18 +11,17 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   std_msgs
+  geometry_msgs
+  yolov8_ros_msgs
   message_filters
   message_generation
   cv_bridge
-  pcl_ros
-  pcl_conversions
 )
 
 find_package(Eigen3 REQUIRED)
 find_package(OpenCV REQUIRED)
-find_package(PCL REQUIRED)
-
-
+#find_package(dlib REQUIRED)
+find_package(OsqpEigen REQUIRED)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -59,10 +58,10 @@ find_package(PCL REQUIRED)
 
 ## Generate messages in the 'msg' folder
  add_message_files(
-   FILES
-   Int32MultiArrayStamped.msg  
-   EIFpairStamped.msg
-   RMSE.msg
+  FILES
+  Int32MultiArrayStamped.msg  
+  EIFpairStamped.msg
+  Plot.msg
  )
 
 ## Generate services in the 'srv' folder
@@ -83,6 +82,8 @@ find_package(PCL REQUIRED)
  generate_messages(
    DEPENDENCIES
    std_msgs
+   geometry_msgs
+   yolov8_ros_msgs
  )
 
 ################################################
@@ -115,11 +116,10 @@ find_package(PCL REQUIRED)
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES state_estimation
-#  CATKIN_DEPENDS roscpp rospy std_msgs
+  INCLUDE_DIRS include
+  LIBRARIES Mav Camera
 #  DEPENDS system_lib
-CATKIN_DEPENDS message_runtime cv_bridge roscpp rospy std_msgs pcl_conversions
+CATKIN_DEPENDS message_runtime cv_bridge roscpp rospy std_msgs geometry_msgs pcl_conversions
 )
 
 ###########
@@ -129,11 +129,11 @@ CATKIN_DEPENDS message_runtime cv_bridge roscpp rospy std_msgs pcl_conversions
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-# include
+  include
   ${catkin_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
-  ${PCL_INCLUDE_DIRS}
+  ${dlib_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
@@ -141,23 +141,68 @@ include_directories(
 #   src/${PROJECT_NAME}/state_estimation.cpp
 # )
 
-add_library(EIF
-   src/EIF.cpp
+add_library(Camera
+   src/Camera.cpp
 )
-target_include_directories(EIF PRIVATE
+target_include_directories(Camera PRIVATE
   include/${PROJECT_NAME}/ )
+target_link_libraries(Camera
+  ${catkin_LIBRARIES})
 
-add_library(HEIF
-   src/HEIF.cpp
+add_library(Mav
+   src/ROSmsg_related/Mav.cpp
 )
-target_include_directories(HEIF PRIVATE
+target_include_directories(Mav PRIVATE
   include/${PROJECT_NAME}/ )
+target_link_libraries(Mav
+  Camera
+  ${catkin_LIBRARIES})
+
+add_library(GT_measurement_ros
+  src/ROSmsg_related/GT_measurement_ros.cpp
+)
+target_include_directories(GT_measurement_ros PRIVATE
+ include/${PROJECT_NAME}/ )
+target_link_libraries(GT_measurement_ros
+ ${catkin_LIBRARIES})
+
+add_library(EIFpairs_ros
+ src/ROSmsg_related/EIFpairs_ros.cpp
+)
+target_include_directories(EIFpairs_ros PRIVATE
+include/${PROJECT_NAME}/ )
+target_link_libraries(EIFpairs_ros
+${catkin_LIBRARIES})
+
+add_library(EIF
+   src/EIF_related/EIF.cpp
+   src/EIF_related/TEIF.cpp
+   src/EIF_related/TEIF_Lidar.cpp
+   src/EIF_related/SEIF.cpp
+   src/EIF_related/SEIF_pose.cpp
+   src/EIF_related/SEIF_neighbors.cpp
+   src/EIF_related/SEIF_lidar_neighbors.cpp
+   src/EIF_related/HEIF.cpp
+   src/EIF_related/HEIF_self.cpp
+   src/EIF_related/HEIF_target.cpp
+)
+target_link_libraries(EIF
+  ${catkin_LIBRARIES} 
+  ${dlib_LIBRARIES}
+  OsqpEigen::OsqpEigen 
+  Camera
+  )
+target_include_directories(EIF PRIVATE
+  include/${PROJECT_NAME})
 
 # state_estimation
 add_executable(state_estimation 
   node/state_estimation.cpp
   )
 target_link_libraries(state_estimation
+  Mav
+  GT_measurement_ros
+  EIFpairs_ros
   EIF
   ${catkin_LIBRARIES} )
 target_include_directories(state_estimation PRIVATE
@@ -169,21 +214,9 @@ add_executable(self_msg_sync
   )
 target_link_libraries(self_msg_sync
   ${catkin_LIBRARIES} 
-  ${PCL_LIBRARIES}
   )
 target_include_directories(self_msg_sync PRIVATE
   include/${PROJECT_NAME}/ ) 
-
-#consensus_state_estimation
-add_executable(consensus_state_estimation 
-  node/consensus_state_estimation.cpp
-  )
-target_link_libraries(consensus_state_estimation
-  ${catkin_LIBRARIES} 
-  HEIF)
-target_include_directories(consensus_state_estimation PRIVATE
-  include/${PROJECT_NAME}/ ) 
-
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
@@ -232,18 +265,20 @@ target_include_directories(consensus_state_estimation PRIVATE
 
 ## Mark libraries for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_libraries.html
-# install(TARGETS ${PROJECT_NAME}
-#   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-#   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-#   RUNTIME DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION}
-# )
+install(
+  TARGETS ${PROJECT_NAME}
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION}
+)
 
 ## Mark cpp header files for installation
-# install(DIRECTORY include/${PROJECT_NAME}/
-#   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-#   FILES_MATCHING PATTERN "*.h"
-#   PATTERN ".svn" EXCLUDE
-# )
+install(
+  DIRECTORY include/${PROJECT_NAME}/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+  #  FILES_MATCHING PATTERN "*.h"
+  #  PATTERN ".svn" EXCLUDE
+)
 
 ## Mark other files for installation (e.g. launch and bag files, etc.)
 # install(FILES
