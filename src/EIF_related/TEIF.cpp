@@ -1,7 +1,9 @@
 #include "TEIF.h"
 #include "HEIF_target.h"
+#include "math_function.h"
 #include <iostream>
 #include <vector>
+#include <Eigen/Dense>
 
 target_EIF::target_EIF(int state_size)
 {
@@ -56,6 +58,7 @@ void target_EIF::computePredPairs(double delta_t)
 
 	T.P_hat = T.F*T.P*T.F.transpose() + Q;
 }
+
 void target_EIF::computeCorrPairs()
 {
 	T.z = boundingBox;
@@ -115,11 +118,13 @@ void target_EIF::computeCorrPairs()
 	T.pre_z = T.z;
 }
 
-void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::MatrixXd weightedS, Eigen::VectorXd weightedXi_hat, Eigen::VectorXd weightedY)
+void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::MatrixXd weightedS,
+										   Eigen::VectorXd weightedXi_hat, Eigen::VectorXd weightedY,
+										   double eta_ij)
 {
-    Eigen::Vector3d gradient_TH_11, gradient_TH_12, gradient_TH_13;
-    Eigen::Vector3d gradient_TH_21, gradient_TH_22, gradient_TH_23;
-    Eigen::Vector3d gradient_TH_31, gradient_TH_32, gradient_TH_33;
+    std::vector<double> gradient_TH_11, gradient_TH_12, gradient_TH_13,
+						gradient_TH_21, gradient_TH_22, gradient_TH_23,
+						gradient_TH_31, gradient_TH_32, gradient_TH_33;
 
     Eigen::Matrix3d R_b2c = cam.R_B2C();
     Eigen::Matrix3d R_w2c = R_b2c * Mav_eigen_self.R_w2b;
@@ -129,55 +134,55 @@ void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::Matrix
     double Y = r_qc_c(1) / r_qc_c(2);
     double Z = r_qc_c(2);
 
-    gradient_TH_11(0) = (cam.fx() * R_w2c(2, 0) / (Z * Z)) * R_w2c(0, 0) + 
+	// gradient_TH is a 3x3 matrix，using std::vector<double> as its element.
+    std::vector<std::vector<std::vector<double>>> gradient_TH(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
+    
+    gradient_TH_11[0] = (cam.fx() * R_w2c(2, 0) / (Z * Z)) * R_w2c(0, 0) + 
                         ((cam.fx() * R_w2c(0, 0) / (Z * Z)) - (2 * cam.fx() * R_w2c(2, 0) * X / (Z * Z))) * R_w2c(2, 0);
-    gradient_TH_11(1) = (cam.fx() * R_w2c(2, 0) / (Z * Z)) * R_w2c(0, 1) + 
+    gradient_TH_11[1] = (cam.fx() * R_w2c(2, 0) / (Z * Z)) * R_w2c(0, 1) + 
                         ((cam.fx() * R_w2c(0, 0) / (Z * Z)) - (2 * cam.fx() * R_w2c(2, 0) * X / (Z * Z))) * R_w2c(2, 1);
-    gradient_TH_11(2) = (cam.fx() * R_w2c(2, 0) / (Z * Z)) * R_w2c(0, 2) + 
+    gradient_TH_11[2] = (cam.fx() * R_w2c(2, 0) / (Z * Z)) * R_w2c(0, 2) + 
                         ((cam.fx() * R_w2c(0, 0) / (Z * Z)) - (2 * cam.fx() * R_w2c(2, 0) * X / (Z * Z))) * R_w2c(2, 2);
     
-    gradient_TH_12(0) = (cam.fx() * R_w2c(2, 1) / (Z * Z)) * R_w2c(0, 0) + 
+    gradient_TH_12[0] = (cam.fx() * R_w2c(2, 1) / (Z * Z)) * R_w2c(0, 0) + 
                         ((cam.fx() * R_w2c(0, 1) / (Z * Z)) - (2 * cam.fx() * R_w2c(2, 1) * X / (Z * Z))) * R_w2c(2, 0);
-    gradient_TH_12(1) = (cam.fx() * R_w2c(2, 1) / (Z * Z)) * R_w2c(0, 1) + 
+    gradient_TH_12[1] = (cam.fx() * R_w2c(2, 1) / (Z * Z)) * R_w2c(0, 1) + 
                         ((cam.fx() * R_w2c(0, 1) / (Z * Z)) - (2 * cam.fx() * R_w2c(2, 1) * X / (Z * Z))) * R_w2c(2, 1);
-    gradient_TH_12(2) = (cam.fx() * R_w2c(2, 1) / (Z * Z)) * R_w2c(0, 2) + 
+    gradient_TH_12[2] = (cam.fx() * R_w2c(2, 1) / (Z * Z)) * R_w2c(0, 2) + 
                         ((cam.fx() * R_w2c(0, 1) / (Z * Z)) - (2 * cam.fx() * R_w2c(2, 1) * X / (Z * Z))) * R_w2c(2, 2);
 
-    gradient_TH_13(0) = (cam.fx() * R_w2c(2, 2) / (Z * Z)) * R_w2c(0, 0) + 
+    gradient_TH_13[0] = (cam.fx() * R_w2c(2, 2) / (Z * Z)) * R_w2c(0, 0) + 
                         ((cam.fx() * R_w2c(0, 2) / (Z * Z)) - (2 * cam.fx() * R_w2c(2, 2) * X / (Z * Z))) * R_w2c(2, 0);
-    gradient_TH_13(1) = (cam.fx() * R_w2c(2, 2) / (Z * Z)) * R_w2c(0, 1) + 
+    gradient_TH_13[1] = (cam.fx() * R_w2c(2, 2) / (Z * Z)) * R_w2c(0, 1) + 
                         ((cam.fx() * R_w2c(0, 2) / (Z * Z)) - (2 * cam.fx() * R_w2c(2, 2) * X / (Z * Z))) * R_w2c(2, 1);
-    gradient_TH_13(2) = (cam.fx() * R_w2c(2, 2) / (Z * Z)) * R_w2c(0, 2) + 
+    gradient_TH_13[2] = (cam.fx() * R_w2c(2, 2) / (Z * Z)) * R_w2c(0, 2) + 
                         ((cam.fx() * R_w2c(0, 2) / (Z * Z)) - (2 * cam.fx() * R_w2c(2, 2) * X / (Z * Z))) * R_w2c(2, 2);
 
-    gradient_TH_21(0) = (cam.fy() * R_w2c(2, 0) / (Z * Z)) * R_w2c(1, 0) + 
+    gradient_TH_21[0] = (cam.fy() * R_w2c(2, 0) / (Z * Z)) * R_w2c(1, 0) + 
                         ((cam.fy() * R_w2c(1, 0) / (Z * Z)) - (2 * cam.fy() * R_w2c(2, 0) * Y / (Z * Z))) * R_w2c(2, 0);
-    gradient_TH_21(1) = (cam.fy() * R_w2c(2, 0) / (Z * Z)) * R_w2c(1, 1) + 
+    gradient_TH_21[1] = (cam.fy() * R_w2c(2, 0) / (Z * Z)) * R_w2c(1, 1) + 
                         ((cam.fy() * R_w2c(1, 0) / (Z * Z)) - (2 * cam.fy() * R_w2c(2, 0) * Y / (Z * Z))) * R_w2c(2, 1);
-    gradient_TH_21(2) = (cam.fy() * R_w2c(2, 0) / (Z * Z)) * R_w2c(1, 2) + 
+    gradient_TH_21[2] = (cam.fy() * R_w2c(2, 0) / (Z * Z)) * R_w2c(1, 2) + 
                         ((cam.fy() * R_w2c(1, 0) / (Z * Z)) - (2 * cam.fy() * R_w2c(2, 0) * Y / (Z * Z))) * R_w2c(2, 2);
 
-    gradient_TH_22(0) = (cam.fy() * R_w2c(2, 1) / (Z * Z)) * R_w2c(1, 0) + 
+    gradient_TH_22[0] = (cam.fy() * R_w2c(2, 1) / (Z * Z)) * R_w2c(1, 0) + 
                         ((cam.fy() * R_w2c(1, 1) / (Z * Z)) - (2 * cam.fy() * R_w2c(2, 1) * Y / (Z * Z))) * R_w2c(2, 0);
-    gradient_TH_22(1) = (cam.fy() * R_w2c(2, 1) / (Z * Z)) * R_w2c(1, 1) + 
+    gradient_TH_22[1] = (cam.fy() * R_w2c(2, 1) / (Z * Z)) * R_w2c(1, 1) + 
                         ((cam.fy() * R_w2c(1, 1) / (Z * Z)) - (2 * cam.fy() * R_w2c(2, 1) * Y / (Z * Z))) * R_w2c(2, 1);
-    gradient_TH_22(2) = (cam.fy() * R_w2c(2, 1) / (Z * Z)) * R_w2c(1, 2) + 
+    gradient_TH_22[2] = (cam.fy() * R_w2c(2, 1) / (Z * Z)) * R_w2c(1, 2) + 
                         ((cam.fy() * R_w2c(1, 1) / (Z * Z)) - (2 * cam.fy() * R_w2c(2, 1) * Y / (Z * Z))) * R_w2c(2, 2);
     
-    gradient_TH_23(0) = (cam.fy() * R_w2c(2, 2) / (Z * Z)) * R_w2c(1, 0) + 
+    gradient_TH_23[0] = (cam.fy() * R_w2c(2, 2) / (Z * Z)) * R_w2c(1, 0) + 
                         ((cam.fy() * R_w2c(1, 2) / (Z * Z)) - (2 * cam.fy() * R_w2c(2, 2) * Y / (Z * Z))) * R_w2c(2, 0);
-    gradient_TH_23(1) = (cam.fy() * R_w2c(2, 2) / (Z * Z)) * R_w2c(1, 1) + 
+    gradient_TH_23[1] = (cam.fy() * R_w2c(2, 2) / (Z * Z)) * R_w2c(1, 1) + 
                         ((cam.fy() * R_w2c(1, 2) / (Z * Z)) - (2 * cam.fy() * R_w2c(2, 2) * Y / (Z * Z))) * R_w2c(2, 1);
-    gradient_TH_23(2) = (cam.fy() * R_w2c(2, 2) / (Z * Z)) * R_w2c(1, 2) + 
+    gradient_TH_23[2] = (cam.fy() * R_w2c(2, 2) / (Z * Z)) * R_w2c(1, 2) + 
                         ((cam.fy() * R_w2c(1, 2) / (Z * Z)) - (2 * cam.fy() * R_w2c(2, 2) * Y / (Z * Z))) * R_w2c(2, 2);
 
-    gradient_TH_31.setZero();
-    gradient_TH_32.setZero();
-    gradient_TH_33.setZero();
+    gradient_TH_31 = {0, 0, 0};
+    gradient_TH_32 = {0, 0, 0};
+    gradient_TH_33 = {0, 0, 0};
 
-    // gradient_TH is a 3x3 matrix，using Eigen::Vector3d as its element.
-    std::vector<std::vector<Eigen::Vector3d>> gradient_TH(3, std::vector<Eigen::Vector3d>(3));
-    
     gradient_TH[0][0] = gradient_TH_11;
     gradient_TH[0][1] = gradient_TH_12;
     gradient_TH[0][2] = gradient_TH_13;
@@ -188,30 +193,54 @@ void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::Matrix
     gradient_TH[2][1] = gradient_TH_32;
     gradient_TH[2][2] = gradient_TH_33;
 
-	std::vector<std::vector<Eigen::Vector3d>> gradient_H(3, std::vector<Eigen::Vector3d>(3));
+	std::vector<std::vector<std::vector<double>>> gradient_H(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
 
-	gradient_H = -gradient_TH;
+	for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            for (int k = 0; k < 3; ++k) {
+                gradient_H[i][j][k] = -gradient_TH[i][j][k];
+            }
+        }
+    }
 
-	Eigen::MatrixXd R_hat, R_bar;
+	Eigen::MatrixXd R_tilde, R_bar;
 
-	R_hat 				= R + self.H*self.P_hat*self.H.transpose();//R tilde
+	R_tilde				= R + self.H*self.P_hat*self.H.transpose();//R tilde
 	R_bar 				= R + T.H*T.P_hat*T.H.transpose();//R bar
 
-	gradient_RTilde 	= gradient_H*self.P_hat*self.H.transpose() + 
-						  self.H*self.P_hat*gradient_H.transpose();//(17)
+	std::vector<std::vector<std::vector<double>>> gradient_RTilde(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
+	std::vector<std::vector<std::vector<double>>> gradient_RTilde_inv(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
+	std::vector<std::vector<std::vector<double>>> gradient_TetaTs(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
+	std::vector<std::vector<std::vector<double>>> gradient_pBreve(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
+	std::vector<std::vector<std::vector<double>>> gradient_p(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
+	std::vector<std::vector<std::vector<double>>> gradient_pBreve_inv(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
+	Eigen::VectorXd x_breve;
+	Eigen::MatrixXd gradient_x_breve;
+	Eigen::MatrixXd gradient_x_hat;
+
+	gradient_RTilde 	= M_T_multiply(gradient_H, (self.P_hat*self.H.transpose())) + 
+						  (self.H*self.P_hat) * gradient_H.transpose();//(17)
 
 	gradient_RTilde_inv = - R_bar.inverse()*gradient_RTilde*R_bar.inverse();//(16)
 
-	gradient_TetaTs 	= gradient_TH.transpose()*R_hat.inverse()*T.H +
+	gradient_TetaTs 	= eta_ij*(gradient_TH.transpose()*R_hat.inverse()*T.H +
 					 	  T.H.transpose()*gradient_RTilde_inv*T.H +
-					 	  T.H.transpose()*R_hat.inverse()*gradient_TH;//(12)
+					 	  T.H.transpose()*R_hat.inverse()*gradient_TH);//(12) 
+	//eta_ij has not been declared or initialized yet.(in HEIF_target)
 
 	gradient_pBreve 	= - T.s.inverse()*gradient_TetaTs*T.s.inverse();//(11)
 
 	gradient_p 			= fusedP*weightedS.inverse()*gradient_pBreve*weightedS.inverse()*fusedP;//(10)
 
-	gradient_x_hat		= gradient_p*(weightedXi_hat + weightedY)+
-						  fusedP;//(9)
+	gradient_pBreve_inv = - weightedS*gradient_pBreve*weightedS;//(18)
+
+	x_breve				= weightedS.inverse()*weightedY;//(19)
+
+	gradient_x_breve	=
+
+	gradient_x_hat		= gradient_p*(weightedXi_hat + weightedY) +
+						  fusedP*gradient_pBreve_inv*p_breve +
+						  fusedP*weightedS*gradient_x_breve;//(9)
 }
 
 void target_EIF::setFusionPairs(Eigen::MatrixXd fusedP, Eigen::VectorXd fusedX, double time)

@@ -11,6 +11,7 @@ class HEIF_target : public HEIF
 private:
 	std::vector<EIF_data> est_data;
 	std::vector<double> weight;
+	double eta_ij;
 
 	int fusionNum;
 	int state_size;
@@ -45,6 +46,7 @@ public:
 	HEIF_target(int x_size);
 	~HEIF_target();
 	void setTargetEstData(std::vector<EIF_data> est_Data);
+	void setEta_ij();
 	void TargetEstDataCI();
 	void CI_combination();
 	void stdDevFilter();

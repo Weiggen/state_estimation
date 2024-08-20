@@ -16,7 +16,6 @@ protected:
 	Eigen::VectorXd weightedY;
 	Eigen::MatrixXd fusedP;
 	Eigen::VectorXd fusedX;
-
 	int fusionNum;
 	int state_size;
 public:

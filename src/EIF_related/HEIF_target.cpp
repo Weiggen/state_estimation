@@ -20,6 +20,8 @@ void HEIF_target::setTargetEstData(std::vector<EIF_data> est_Data)
     weight.resize(fusionNum);
 }
 
+double HEIF_target::setEta_ij(){return eta_ij}
+
 void HEIF_target::TargetEstDataCI()
 {
 	double trace_sum = 0.0;
@@ -43,6 +45,7 @@ void HEIF_target::TargetEstDataCI()
 			weight[i] = est_data[i].s.trace()/trace_sum;
 			weightedS += weight[i]*est_data[i].s;
 			weightedY += weight[i]*est_data[i].y;
+			eta_ij	  = weight[fusionNum];
 		}
 	}
 }

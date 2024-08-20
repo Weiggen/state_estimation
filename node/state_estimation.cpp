@@ -33,6 +33,7 @@
 #include "GT_measurement_ros.h"
 #include "EIFpairs_ros.h"
 #include "Camera.h"
+#include "MathLib.h"
 
 using namespace std;
 
@@ -194,7 +195,7 @@ int main(int argc, char **argv)
 		// if(gt_m.ifCameraMeasure())
 		// {
 			teif.setFusionPairs(theif.getFusedCov(), theif.getFusedState(), ros::Time::now().toSec());
-			
+
 			// if(theif.QP_init(15, 2))
 			// {
 			// 	theif.QP_pushData(ros::Time::now().toSec(), theif.getFusedState().segment(0, 3));
@@ -202,6 +203,10 @@ int main(int argc, char **argv)
 			// 		teif.setEstAcc(theif.getQpAcc());
 			// }
 		// }
+
+////place the gradient function here.
+		teif.computeGradientDensityFnc( , , , , , theif.setEta_ij());
+
 		std::cout << "TEIF:\n";
 		eif_ros.tgtState_Plot_pub.publish(compare(gt_m.getGTs_eigen()[0], theif.getFusedState() , theif.getFusedCov(), gt_m.getGTorientation(ID)));
 

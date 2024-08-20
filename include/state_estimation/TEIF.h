@@ -33,7 +33,11 @@ public:
     void setFusionPairs(Eigen::MatrixXd fusedP, Eigen::VectorXd fusedX, double time);
     void setEstAcc(Eigen::Vector3d acc);
     void setCamera(Camera camera);
-    void computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::MatrixXd weightedS, Eigen::VectorXd weightedXi_hat, Eigen::VectorXd weightedY);
+
+    //void setCorrPairs();
+    void computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::MatrixXd weightedS,
+                                   Eigen::VectorXd weightedXi_hat, Eigen::VectorXd weightedY,
+                                   double eta_ij);
 
     EIF_data getTgtData();
     EIF_data getSelfData();
