@@ -1,6 +1,6 @@
 #include "TEIF.h"
 #include "HEIF_target.h"
-#include "math_function.h"
+#include "MathLib.h"
 #include <iostream>
 #include <vector>
 #include <Eigen/Dense>
@@ -218,7 +218,7 @@ void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::Matrix
 	Eigen::MatrixXd gradient_x_breve;
 	Eigen::MatrixXd gradient_x_hat;
 
-	gradient_RTilde 	= M_T_multiply(gradient_H, (self.P_hat*self.H.transpose())) + 
+	gradient_RTilde 	= tensormath.T_M_mutiply(gradient_H, (self.P_hat*self.H.transpose()))+
 						  (self.H*self.P_hat) * gradient_H.transpose();//(17)
 
 	gradient_RTilde_inv = - R_bar.inverse()*gradient_RTilde*R_bar.inverse();//(16)

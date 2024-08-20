@@ -185,6 +185,7 @@ add_library(EIF
    src/EIF_related/HEIF.cpp
    src/EIF_related/HEIF_self.cpp
    src/EIF_related/HEIF_target.cpp
+   src/EIF_related/MathLib.cpp
 )
 target_link_libraries(EIF
   ${catkin_LIBRARIES} 

@@ -1,5 +1,6 @@
 #include "EIF.h"
 #include "Camera.h"
+#include "MathLib.h"
 
 class target_EIF : public EIF
 {
@@ -10,6 +11,7 @@ private:
     
 
     Camera cam;
+    MathLib tensormath;
     double X;
     double Y;
     double Z;

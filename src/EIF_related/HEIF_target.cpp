@@ -20,7 +20,7 @@ void HEIF_target::setTargetEstData(std::vector<EIF_data> est_Data)
     weight.resize(fusionNum);
 }
 
-double HEIF_target::setEta_ij(){return eta_ij}
+double HEIF_target::setEta_ij(){return eta_ij;}
 
 void HEIF_target::TargetEstDataCI()
 {
