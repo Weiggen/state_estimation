@@ -204,8 +204,9 @@ int main(int argc, char **argv)
 			// }
 		// }
 
-////place the gradient function here.
-		// teif.computeGradientDensityFnc( , , , , , theif.setEta_ij());
+//// Place the gradient function here.
+		// teif.computeGradientDensityFnc(theif.getFusedCov(), theif.getWeightedS(), theif.getWeightedY(), theif.getWeightedXi_hat(), theif.getEta_ij());
+//// Publish to control.py
 
 		std::cout << "TEIF:\n";
 		eif_ros.tgtState_Plot_pub.publish(compare(gt_m.getGTs_eigen()[0], theif.getFusedState() , theif.getFusedCov(), gt_m.getGTorientation(ID)));

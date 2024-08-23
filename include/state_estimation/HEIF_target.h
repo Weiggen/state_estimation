@@ -46,7 +46,7 @@ public:
 	HEIF_target(int x_size);
 	~HEIF_target();
 	void setTargetEstData(std::vector<EIF_data> est_Data);
-	double setEta_ij();
+	double getEta_ij();
 	void TargetEstDataCI();
 	void CI_combination();
 	void stdDevFilter();

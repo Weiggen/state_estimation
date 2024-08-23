@@ -71,7 +71,7 @@ void target_EIF::computeCorrPairs()
 
 	if(T.z != T.pre_z && T.z(2) >= 2.0 && T.z(2) <= 12.0)
 	{
-		Eigen::MatrixXd R_hat, R_bar;
+		Eigen::MatrixXd R_tilde, R_bar;
 		Eigen::Matrix3d R_b2c ;
 		R_b2c = cam.R_B2C();
 
@@ -102,11 +102,11 @@ void target_EIF::computeCorrPairs()
 		// T.H    = the partial derivate of the measurement model w.r.t. target pose
 		// self.H = the partial derivate of the measurement w.r.t. agent pose
 
-		R_hat = R + self.H*self.P_hat*self.H.transpose();
+		R_tilde = R + self.H*self.P_hat*self.H.transpose();
 		R_bar = R + T.H*T.P_hat*T.H.transpose();
 
-		T.s = T.H.transpose()*R_hat.inverse()*T.H;
-		T.y = T.H.transpose()*R_hat.inverse()*(T.z - T.h + T.H*T.X_hat);
+		T.s = T.H.transpose()*R_tilde.inverse()*T.H;
+		T.y = T.H.transpose()*R_tilde.inverse()*(T.z - T.h + T.H*T.X_hat);
 
 		self.s = self.H.transpose()*R_bar.inverse()*self.H;
 		self.y = self.H.transpose()*R_bar.inverse()*(self.z - self.h + self.H*self.X_hat);
@@ -118,9 +118,7 @@ void target_EIF::computeCorrPairs()
 	T.pre_z = T.z;
 }
 
-void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::MatrixXd weightedS,
-										   Eigen::VectorXd weightedXi_hat, Eigen::VectorXd weightedY,
-										   double eta_ij)
+void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::MatrixXd weightedS, Eigen::VectorXd weightedY, Eigen::VectorXd weightedXi_hat, double eta_ij)
 {
     std::vector<double> gradient_TH_11, gradient_TH_12, gradient_TH_13,
 						gradient_TH_21, gradient_TH_22, gradient_TH_23,
@@ -214,33 +212,60 @@ void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::Matrix
 	std::vector<std::vector<std::vector<double>>> gradient_pBreve(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
 	std::vector<std::vector<std::vector<double>>> gradient_p(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
 	std::vector<std::vector<std::vector<double>>> gradient_pBreve_inv(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
-	Eigen::VectorXd x_breve;
+	std::vector<std::vector<std::vector<double>>> gradient_TH_trans(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
 	Eigen::MatrixXd gradient_x_breve;
 	Eigen::MatrixXd gradient_x_hat;
+	Eigen::MatrixXd gradient_weightedY;
+	Eigen::VectorXd D_Lphi_x_hat;
+	Eigen::MatrixXd D_Lphi_p_breve;
 
-	gradient_RTilde 	= tensormath.T_M_mutiply(gradient_H, (self.P_hat*self.H.transpose()))+
-						  (self.H*self.P_hat) * gradient_H.transpose();//(17)
+	// "gradient" means the partial derivate wrt prior pose of the agent(x_bar). 
+	gradient_TH_trans 	= tensormath.T_transpose(gradient_TH);
 
-	gradient_RTilde_inv = - R_bar.inverse()*gradient_RTilde*R_bar.inverse();//(16)
+	gradient_RTilde 	= tensormath.T_addition(tensormath.T_M_mutiply(gradient_H, (self.P_hat*self.H.transpose())), tensormath.M_T_mutiply((self.H*self.P_hat), tensormath.T_transpose(gradient_H)));//(17)
 
-	gradient_TetaTs 	= eta_ij*(gradient_TH.transpose()*R_hat.inverse()*T.H +
-					 	  T.H.transpose()*gradient_RTilde_inv*T.H +
-					 	  T.H.transpose()*R_hat.inverse()*gradient_TH);//(12) 
-	//eta_ij has not been declared or initialized yet.(in HEIF_target)
+	gradient_RTilde_inv = tensormath.T_M_mutiply(tensormath.M_T_mutiply(-R_bar.inverse(), gradient_RTilde), R_bar.inverse());//(16)
 
-	gradient_pBreve 	= - T.s.inverse()*gradient_TetaTs*T.s.inverse();//(11)
+	gradient_TetaTs 	= tensormath.cT(eta_ij, (tensormath.T_addition(tensormath.T_addition(tensormath.T_M_mutiply(gradient_TH_trans, R_tilde.inverse()*T.H) ,
+					 	  tensormath.T_M_mutiply(tensormath.M_T_mutiply(T.H.transpose(), gradient_RTilde_inv), T.H)) ,
+					 	  tensormath.M_T_mutiply(T.H.transpose()*R_tilde.inverse(), gradient_TH))));//(12) // eta_ij, from getEta_ij() in HEIF_target.
 
-	gradient_p 			= fusedP*weightedS.inverse()*gradient_pBreve*weightedS.inverse()*fusedP;//(10)
+	gradient_pBreve 	= tensormath.T_M_mutiply(tensormath.M_T_mutiply(- T.s.inverse(), gradient_TetaTs), T.s.inverse());//(11)
 
-	gradient_pBreve_inv = - weightedS*gradient_pBreve*weightedS;//(18)
+	gradient_p 			= tensormath.T_M_mutiply(tensormath.M_T_mutiply(fusedP*weightedS.inverse(), gradient_pBreve), weightedS.inverse()*fusedP);//(10)
 
-	x_breve				= weightedS.inverse()*weightedY;//(19)
+	gradient_pBreve_inv = tensormath.T_M_mutiply(tensormath.M_T_mutiply(- weightedS, gradient_pBreve), weightedS);//(18)
 
-	gradient_x_breve	=
+	gradient_weightedY 	= tensormath.T_V_mutiply(tensormath.T_M_mutiply(gradient_TH_trans, R_tilde.inverse()), (T.z-T.h+T.H*T.X_hat))+
+							tensormath.T_V_mutiply((tensormath.M_T_mutiply(T.H.transpose(), gradient_RTilde_inv)), (T.z-T.h+T.H*T.X_hat))+
+							T.H.transpose()*R_tilde.inverse()*tensormath.T_V_mutiply(gradient_TH, T.X_hat);//(19)
 
-	gradient_x_hat		= gradient_p*(weightedXi_hat + weightedY) +
-						  fusedP*gradient_pBreve_inv*p_breve +
-						  fusedP*weightedS*gradient_x_breve;//(9)
+	gradient_x_breve	= tensormath.T_V_mutiply(gradient_pBreve, weightedY) + eta_ij*T.s.inverse()*gradient_weightedY;//(20)
+
+	gradient_x_hat		= tensormath.T_V_mutiply(gradient_p, (weightedXi_hat + weightedY)) +
+						  fusedP*tensormath.T_V_mutiply(gradient_pBreve_inv, (weightedS.inverse()*weightedY)) +
+						  fusedP*weightedS*gradient_x_breve;//(9) //weightedXi_hat = q; //p_breve = weightedY.inverse(); //x_breve = weightedS.inverse()*weightedY;
+
+	D_Lphi_x_hat		= 0.5*(weightedS.transpose()*weightedXi_hat + weightedS*weightedXi_hat - 2*weightedS*T.X_hat);//(8)
+
+	// Create meshgrid. --- //
+	Eigen::Vector2d grid_size(0.1, 0.1);
+	Eigen::Vector2d map_size(24., 24.);
+	Eigen::Vector2i size = (map_size.array() / grid_size.array()).cast<int>();
+	Eigen::MatrixXi x_coords(size[0], size[1]);
+	Eigen::MatrixXi y_coords(size[0], size[1]);
+
+	for (int i = 0; i < size[0]; ++i) {
+        for (int j = 0; j < size[1]; ++j) {
+            x_coords(i, j) = i;
+            y_coords(i, j) = j;
+        }
+    }
+	// --- Create meshgrid. //
+
+	// Eigen::VectorXd q;
+
+	// D_Lphi_p_breve		= -0.5*weightedS + 0.5*weightedS*();//(21)
 }
 
 void target_EIF::setFusionPairs(Eigen::MatrixXd fusedP, Eigen::VectorXd fusedX, double time)
