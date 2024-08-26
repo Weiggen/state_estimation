@@ -25,7 +25,7 @@ std::vector<std::vector<std::vector<double>>> MathLib::M_T_mutiply(const Eigen::
         for (size_t j = 0; j < m; ++j) {
             for (size_t k = 0; k < p; ++k) {
                 for (size_t l = 0; l < m; ++l) {
-                    T_prime[i][j][k] += M(i, l) * T[l][j][k];
+                    T_prime[i][j][k] = M(i, l) * T[l][j][k];
                 }
             }
         }
@@ -45,7 +45,7 @@ std::vector<std::vector<std::vector<double>>> MathLib::T_M_mutiply(const std::ve
         for (size_t j = 0; j < m; ++j) {
             for (size_t k = 0; k < p; ++k) {
                 for (size_t l = 0; l < m; ++l) {
-                    T_prime[i][j][k] += T[i][l][k] * M(l, j);
+                    T_prime[i][j][k] = T[i][l][k] * M(l, j);
                 }
             }
         }
@@ -118,11 +118,51 @@ Eigen::MatrixXd MathLib::T_V_mutiply(const std::vector<std::vector<std::vector<d
     for (size_t i = 0; i < n; ++i) {
         for (size_t j = 0; j < m; ++j) {
             for (size_t k = 0; k < p; ++k) {
-                M(i, k) += V[j] * T[i][j][k];
+                M(i, k) = V[j] * T[i][j][k];
             }
         }
     }
     return M;
 }
 
-// Tensor contraction
+std::vector<std::vector<std::vector<double>>> MathLib::T_resize(const std::vector<std::vector<std::vector<double>>>& T, const int& Dim){
+    // Dimension reduction: m < T.size().
+    size_t m = Dim;
+    std::vector<std::vector<std::vector<double>>> T_prime(m, std::vector<std::vector<double>>(m, std::vector<double>(m, 0.0)));
+    for (size_t i = 0; i < m; ++i) {
+        for (size_t j = 0; j < m; ++j) {
+            for (size_t k = 0; k < m; ++k) {
+                T_prime[i][j][k] = T[i][j][k];
+            }
+        }
+    }
+    return T_prime;    
+}
+
+Eigen::MatrixXd MathLib::M_resize(const Eigen::MatrixXd& M, const int& Dim){
+    size_t m = Dim;
+    Eigen::MatrixXd M_prime(m, m);
+    M_prime.setZero();
+    for (size_t i = 0; i < m; ++i) {
+        for (size_t j = 0; j < m; ++j) {
+            M_prime(i, j) = M(i, j);
+        }
+    }
+    return M_prime;
+}
+
+Eigen::MatrixXd MathLib::TensorContraction(const std::vector<Eigen::MatrixXd>& multi_M, const std::vector<std::vector<std::vector<double>>>& T){
+    size_t n = multi_M.size();
+    Eigen::MatrixXd M_prime(2, n);
+    M_prime.setZero();
+    for (size_t g = 0; g < n; ++g){
+        for (size_t k = 0; k < 2; ++k){
+            for (size_t i = 0; i < T.size(); ++i){
+                for (size_t j = 0; j < T[0].size(); ++j){
+                    M_prime(k, g) += multi_M[g](i, j)*T[i][j][k];
+                }
+            }
+        }
+    }
+    return M_prime;
+}

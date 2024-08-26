@@ -11,7 +11,7 @@ private:
     
 
     Camera cam;
-    MathLib tensormath;
+    MathLib mathLib;
     double X;
     double Y;
     double Z;

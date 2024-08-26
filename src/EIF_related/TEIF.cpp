@@ -213,59 +213,93 @@ void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::Matrix
 	std::vector<std::vector<std::vector<double>>> gradient_p(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
 	std::vector<std::vector<std::vector<double>>> gradient_pBreve_inv(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
 	std::vector<std::vector<std::vector<double>>> gradient_TH_trans(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
-	Eigen::MatrixXd gradient_x_breve;
-	Eigen::MatrixXd gradient_x_hat;
-	Eigen::MatrixXd gradient_weightedY;
-	Eigen::VectorXd D_Lphi_x_hat;
-	Eigen::MatrixXd D_Lphi_p_breve;
+	Eigen::MatrixXd gradient_x_breve(3, 3);
+	Eigen::MatrixXd gradient_x_hat(3, 3);
+	Eigen::MatrixXd gradient_weightedY(3, 3);
 
 	// "gradient" means the partial derivate wrt prior pose of the agent(x_bar). 
-	gradient_TH_trans 	= tensormath.T_transpose(gradient_TH);
+	gradient_TH_trans 	= mathLib.T_transpose(gradient_TH);
 
-	gradient_RTilde 	= tensormath.T_addition(tensormath.T_M_mutiply(gradient_H, (self.P_hat*self.H.transpose())), tensormath.M_T_mutiply((self.H*self.P_hat), tensormath.T_transpose(gradient_H)));//(17)
+	gradient_RTilde 	= mathLib.T_addition(mathLib.T_M_mutiply(gradient_H, (self.P_hat*self.H.transpose())), mathLib.M_T_mutiply((self.H*self.P_hat), mathLib.T_transpose(gradient_H)));//(17)
 
-	gradient_RTilde_inv = tensormath.T_M_mutiply(tensormath.M_T_mutiply(-R_bar.inverse(), gradient_RTilde), R_bar.inverse());//(16)
+	gradient_RTilde_inv = mathLib.T_M_mutiply(mathLib.M_T_mutiply(-R_bar.inverse(), gradient_RTilde), R_bar.inverse());//(16)
 
-	gradient_TetaTs 	= tensormath.cT(eta_ij, (tensormath.T_addition(tensormath.T_addition(tensormath.T_M_mutiply(gradient_TH_trans, R_tilde.inverse()*T.H) ,
-					 	  tensormath.T_M_mutiply(tensormath.M_T_mutiply(T.H.transpose(), gradient_RTilde_inv), T.H)) ,
-					 	  tensormath.M_T_mutiply(T.H.transpose()*R_tilde.inverse(), gradient_TH))));//(12) // eta_ij, from getEta_ij() in HEIF_target.
+	gradient_TetaTs 	= mathLib.cT(eta_ij, (mathLib.T_addition(mathLib.T_addition(mathLib.T_M_mutiply(gradient_TH_trans, R_tilde.inverse()*T.H) ,
+					 	  mathLib.T_M_mutiply(mathLib.M_T_mutiply(T.H.transpose(), gradient_RTilde_inv), T.H)) ,
+					 	  mathLib.M_T_mutiply(T.H.transpose()*R_tilde.inverse(), gradient_TH))));//(12) // eta_ij, from getEta_ij() in HEIF_target.
 
-	gradient_pBreve 	= tensormath.T_M_mutiply(tensormath.M_T_mutiply(- T.s.inverse(), gradient_TetaTs), T.s.inverse());//(11)
+	gradient_pBreve 	= mathLib.T_M_mutiply(mathLib.M_T_mutiply(- T.s.inverse(), gradient_TetaTs), T.s.inverse());//(11)
 
-	gradient_p 			= tensormath.T_M_mutiply(tensormath.M_T_mutiply(fusedP*weightedS.inverse(), gradient_pBreve), weightedS.inverse()*fusedP);//(10)
+	gradient_p 			= mathLib.T_M_mutiply(mathLib.M_T_mutiply(fusedP*weightedS.inverse(), gradient_pBreve), weightedS.inverse()*fusedP);//(10)
 
-	gradient_pBreve_inv = tensormath.T_M_mutiply(tensormath.M_T_mutiply(- weightedS, gradient_pBreve), weightedS);//(18)
+	gradient_pBreve_inv = mathLib.T_M_mutiply(mathLib.M_T_mutiply(- weightedS, gradient_pBreve), weightedS);//(18)
 
-	gradient_weightedY 	= tensormath.T_V_mutiply(tensormath.T_M_mutiply(gradient_TH_trans, R_tilde.inverse()), (T.z-T.h+T.H*T.X_hat))+
-							tensormath.T_V_mutiply((tensormath.M_T_mutiply(T.H.transpose(), gradient_RTilde_inv)), (T.z-T.h+T.H*T.X_hat))+
-							T.H.transpose()*R_tilde.inverse()*tensormath.T_V_mutiply(gradient_TH, T.X_hat);//(19)
+	gradient_weightedY 	= mathLib.T_V_mutiply(mathLib.T_M_mutiply(gradient_TH_trans, R_tilde.inverse()), (T.z-T.h+T.H*T.X_hat))+
+							mathLib.T_V_mutiply((mathLib.M_T_mutiply(T.H.transpose(), gradient_RTilde_inv)), (T.z-T.h+T.H*T.X_hat))+
+							T.H.transpose()*R_tilde.inverse()*mathLib.T_V_mutiply(gradient_TH, T.X_hat);//(19)
 
-	gradient_x_breve	= tensormath.T_V_mutiply(gradient_pBreve, weightedY) + eta_ij*T.s.inverse()*gradient_weightedY;//(20)
+	gradient_x_breve	= mathLib.T_V_mutiply(gradient_pBreve, weightedY) + eta_ij*T.s.inverse()*gradient_weightedY;//(20)
 
-	gradient_x_hat		= tensormath.T_V_mutiply(gradient_p, (weightedXi_hat + weightedY)) +
-						  fusedP*tensormath.T_V_mutiply(gradient_pBreve_inv, (weightedS.inverse()*weightedY)) +
-						  fusedP*weightedS*gradient_x_breve;//(9) //weightedXi_hat = q; //p_breve = weightedY.inverse(); //x_breve = weightedS.inverse()*weightedY;
-
-	D_Lphi_x_hat		= 0.5*(weightedS.transpose()*weightedXi_hat + weightedS*weightedXi_hat - 2*weightedS*T.X_hat);//(8)
+	gradient_x_hat		= mathLib.T_V_mutiply(gradient_p, (weightedXi_hat + weightedY)) +
+						  fusedP*mathLib.T_V_mutiply(gradient_pBreve_inv, (weightedS.inverse()*weightedY)) +
+						  fusedP*weightedS*gradient_x_breve;//(9) //weightedXi_hat = q_{T_ij}; //p_breve = weightedY.inverse(); //x_breve = weightedS.inverse()*weightedY;
 
 	// Create meshgrid. --- //
 	Eigen::Vector2d grid_size(0.1, 0.1);
 	Eigen::Vector2d map_size(24., 24.);
 	Eigen::Vector2i size = (map_size.array() / grid_size.array()).cast<int>();
-	Eigen::MatrixXi x_coords(size[0], size[1]);
-	Eigen::MatrixXi y_coords(size[0], size[1]);
-
+	Eigen::MatrixXd x_coords(size[0], size[1]);
+	Eigen::MatrixXd y_coords(size[0], size[1]);
 	for (int i = 0; i < size[0]; ++i) {
         for (int j = 0; j < size[1]; ++j) {
             x_coords(i, j) = i;
             y_coords(i, j) = j;
         }
     }
+	auto q_x = x_coords*grid_size[0];
+	auto q_y = y_coords*grid_size[1];
+	Eigen::MatrixXd q(2, size[0]*size[1]);
+    int k = 0;
+    for (int i = 0; i < size[0]; ++i) {
+        for (int j = 0; j < size[1]; ++j) {
+            q(0, k) = q_x(i, j);
+            q(1, k) = q_y(i, j);
+            ++k;
+        }
+    }
 	// --- Create meshgrid. //
+	
+	// pose: 3D -> 2D --- //
+	Eigen::MatrixXd weightedS_2D(2, 2);
+	Eigen::VectorXd X_hat_2D(2);
+	Eigen::MatrixXd D_Lphi_x_hat(2, size[0]*size[1]);// (< dimention of vectors >, < numbers of q >)
+	std::vector<Eigen::MatrixXd> D_Lphi_p_breve(size[0]*size[1], Eigen::MatrixXd(2, 2)); // (< numbers of q >, <dimention of the matrices>)
+	weightedS_2D = mathLib.M_resize(weightedS, 2);
+	for (int i = 0; i < 2; ++i){
+		X_hat_2D(i) = T.X_hat(i);
+	}
+	Eigen::MatrixXd gradient_x_hat_2D(2, 2);
+	gradient_x_hat_2D = mathLib.M_resize(gradient_x_hat, gradient_x_hat_2D.size());
+	// --- 3D -> 2D //
 
-	// Eigen::VectorXd q;
+	for (int i = 0; i < q.cols(); ++i){
+		D_Lphi_x_hat.col(i) = 0.5 * (weightedS_2D.transpose() * q.col(i) + weightedS_2D * q.col(i) - 2 * weightedS_2D * X_hat_2D);// (8)
+    }
+	
+    for (int i = 0; i < q.cols(); ++i) {
+        Eigen::VectorXd diff = q.col(i) - X_hat_2D;
+        D_Lphi_p_breve[i] = -0.5 * weightedS_2D + 0.5 * weightedS_2D * diff * diff.transpose() * weightedS_2D;// (21)
+    }
 
-	// D_Lphi_p_breve		= -0.5*weightedS + 0.5*weightedS*();//(21)
+	Eigen::MatrixXd multi_vector_result1(2, size[0]*size[1]);
+	Eigen::MatrixXd multi_vector_result2(2, size[0]*size[1]);
+	multi_vector_result1.setZero();
+	multi_vector_result2.setZero();
+	multi_vector_result1 = mathLib.TensorContraction(D_Lphi_p_breve, gradient_pBreve);
+	multi_vector_result2 = gradient_x_hat_2D.transpose()*D_Lphi_x_hat;
+
+	Eigen::MatrixXd gradient2(2, size[0]*size[1]);
+	gradient2 = multi_vector_result1 + multi_vector_result2;// (7)
 }
 
 void target_EIF::setFusionPairs(Eigen::MatrixXd fusedP, Eigen::VectorXd fusedX, double time)
