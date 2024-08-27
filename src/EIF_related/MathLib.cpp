@@ -157,8 +157,8 @@ Eigen::MatrixXd MathLib::TensorContraction(const std::vector<Eigen::MatrixXd>& m
     M_prime.setZero();
     for (size_t g = 0; g < n; ++g){
         for (size_t k = 0; k < 2; ++k){
-            for (size_t i = 0; i < T.size(); ++i){
-                for (size_t j = 0; j < T[0].size(); ++j){
+            for (size_t i = 0; i < 2; ++i){
+                for (size_t j = 0; j < 2; ++j){
                     M_prime(k, g) += multi_M[g](i, j)*T[i][j][k];
                 }
             }
