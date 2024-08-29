@@ -8,6 +8,7 @@
 #include <state_estimation/EIFpairStamped.h>
 #include <state_estimation/Plot.h>
 #include <Eigen/SVD>  
+#include <state_estimation/densityGradient.h>
 
 #include "Mav.h"
 
@@ -25,6 +26,7 @@ private:
 	std::string selfPredEIFpairs_pub_topic;
 	std::string tgtStatePlot_topic;
 	std::string selfStatePlot_topic;
+	std::string densityGradient_pub_topic;// For coverageCtrl
 
 	int state_size;
 	int mavNum;
@@ -38,6 +40,7 @@ public:
 	ros::Publisher selfState_Plot_pub;
 	ros::Publisher self2TgtEIFpairs_pub;
 	ros::Publisher selfPredEIFpairs_pub;
+	ros::Publisher densityGradient_pub;// For coverageCtrl
 
 	std_msgs::Header sync_header;
 	state_estimation::EIFpairStamped* neighborsEIFpairs;
@@ -60,5 +63,6 @@ public:
 EIF_data eifMsg2Eigen(state_estimation::EIFpairStamped eifMsg);
 state_estimation::EIFpairStamped eigen2EifMsg(EIF_data est_object, int self_id);
 state_estimation::Plot compare(MAV_eigen GT, Eigen::VectorXd est , Eigen::MatrixXd est_p, geometry_msgs::Quaternion);
+state_estimation::densityGradient eigen2densityGradient(Eigen::MatrixXd M);// For coverageCtrl
 
 #endif

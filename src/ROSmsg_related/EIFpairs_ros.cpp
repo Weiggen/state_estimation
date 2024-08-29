@@ -32,6 +32,7 @@ EIFpairs_ros::EIFpairs_ros(ros::NodeHandle &nh, string vehicle, int ID, int mavn
 	selfState_Plot_pub = nh.advertise<state_estimation::Plot>(selfStatePlot_topic, 1);
 	self2TgtEIFpairs_pub = nh.advertise<state_estimation::EIFpairStamped>(self2TgtEIFpairs_pub_topic, 1);
 	selfPredEIFpairs_pub = nh.advertise<state_estimation::EIFpairStamped>(selfPredEIFpairs_pub_topic, 1);
+	densityGradient_pub = nh.advertise<state_estimation::densityGradient>(densityGradient_pub_topic, 1);// For coverageCtrl
 	////////////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 
@@ -54,6 +55,8 @@ void EIFpairs_ros::set_topic(std::string vehicle, int id)
 	tgtStatePlot_topic = prefix  + std::string("/THEIF/Plot");
 	selfStatePlot_topic = prefix + std::string("/SHEIF/Plot");
 	selfPredEIFpairs_pub_topic = prefix + std::string("/SEIF_pred/fusionPairs");
+
+	densityGradient_pub_topic = prefix + std::string("/densityGradient");// For coverageCtrl
 
 	neighborsEIFpairs_sub_topic = new std::string[mavNum];
 	rbs2TgtEIFpairs_sub_topic = new std::string[mavNum];
@@ -109,6 +112,19 @@ state_estimation::EIFpairStamped eigen2EifMsg(EIF_data est_object, int self_id)
 	EIFpairs.header.stamp.nsec = ros::Time::now().nsec;
 	EIFpairs.id = self_id;
 	return EIFpairs;
+}
+
+state_estimation::densityGradient eigen2densityGradient(Eigen::MatrixXd M){
+	// For coverageCtrl
+	state_estimation::densityGradient ros_g;
+	size_t n = M.cols();
+	for (size_t i = 0; i < n; ++i){
+		ros_g.gradient_x[i] = M(0, i);
+	}
+	for (size_t i = 0; i < n; ++i){
+		ros_g.gradient_y[i] = M(1, i);
+	}
+	return ros_g;
 }
 
 EIF_data eifMsg2Eigen(state_estimation::EIFpairStamped eifMsg)

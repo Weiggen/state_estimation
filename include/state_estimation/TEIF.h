@@ -36,8 +36,7 @@ public:
     void setEstAcc(Eigen::Vector3d acc);
     void setCamera(Camera camera);
 
-    //void setCorrPairs();
-    void computeGradientDensityFnc(Eigen::MatrixXd fusedP, 
+    Eigen::MatrixXd getGradientDensityFnc(Eigen::MatrixXd fusedP, 
                                     Eigen::MatrixXd weightedS, Eigen::VectorXd weightedY,
                                     Eigen::VectorXd weightedXi_hat,
                                     double eta_ij);

@@ -4,6 +4,7 @@
 #include <iostream>
 #include <vector>
 #include <Eigen/Dense>
+#include <cmath>
 
 target_EIF::target_EIF(int state_size)
 {
@@ -118,19 +119,40 @@ void target_EIF::computeCorrPairs()
 	T.pre_z = T.z;
 }
 
-void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::MatrixXd weightedS, Eigen::VectorXd weightedY, Eigen::VectorXd weightedXi_hat, double eta_ij)
+Eigen::MatrixXd target_EIF::getGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::MatrixXd weightedS, Eigen::VectorXd weightedY, Eigen::VectorXd weightedXi_hat, double eta_ij)
 {
-    std::vector<double> gradient_TH_11, gradient_TH_12, gradient_TH_13,
-						gradient_TH_21, gradient_TH_22, gradient_TH_23,
-						gradient_TH_31, gradient_TH_32, gradient_TH_33;
+    std::vector<double> gradient_TH_11(3), gradient_TH_12(3), gradient_TH_13(3),
+						gradient_TH_21(3), gradient_TH_22(3), gradient_TH_23(3),
+						gradient_TH_31(3), gradient_TH_32(3), gradient_TH_33(3);
 
-    Eigen::Matrix3d R_b2c = cam.R_B2C();
+    Eigen::Matrix3d R_b2c;
+	R_b2c << 0, 1, 0,
+			 0, 0, 1,
+			 1, 0, 0;
     Eigen::Matrix3d R_w2c = R_b2c * Mav_eigen_self.R_w2b;
     Eigen::Vector3d r_qc_c = R_w2c * (T.X_hat.segment(0, 3) - self.X_hat.segment(0, 3)); 
 
     double X = r_qc_c(0) / r_qc_c(2);
     double Y = r_qc_c(1) / r_qc_c(2);
     double Z = r_qc_c(2);
+
+	T.h(0) = cam.fx()*X + cam.cx();
+	T.h(1) = cam.fy()*Y + cam.cy();
+	T.h(2) = Z;
+	self.z = T.z;
+	self.h = T.h;
+
+	T.H(0, 0) = (cam.fx()/Z)*(R_w2c(0, 0) - R_w2c(2, 0)*X);
+	T.H(0, 1) = (cam.fx()/Z)*(R_w2c(0, 1) - R_w2c(2, 1)*X);
+	T.H(0, 2) = (cam.fx()/Z)*(R_w2c(0, 2) - R_w2c(2, 2)*X);
+	T.H(1, 0) = (cam.fy()/Z)*(R_w2c(1, 0) - R_w2c(2, 0)*Y);
+	T.H(1, 1) = (cam.fy()/Z)*(R_w2c(1, 1) - R_w2c(2, 1)*Y);
+	T.H(1, 2) = (cam.fy()/Z)*(R_w2c(1, 2) - R_w2c(2, 2)*Y);
+	T.H(2, 0) = R_w2c(2, 0);
+	T.H(2, 1) = R_w2c(2, 1);
+	T.H(2, 2) = R_w2c(2, 2);
+
+	self.H = -T.H;
 
 	// gradient_TH is a 3x3 matrix，using std::vector<double> as its element.
     std::vector<std::vector<std::vector<double>>> gradient_TH(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
@@ -177,9 +199,9 @@ void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::Matrix
     gradient_TH_23[2] = (cam.fy() * R_w2c(2, 2) / (Z * Z)) * R_w2c(1, 2) + 
                         ((cam.fy() * R_w2c(1, 2) / (Z * Z)) - (2 * cam.fy() * R_w2c(2, 2) * Y / (Z * Z))) * R_w2c(2, 2);
 
-    gradient_TH_31 = {0, 0, 0};
-    gradient_TH_32 = {0, 0, 0};
-    gradient_TH_33 = {0, 0, 0};
+    gradient_TH_31 = {0., 0., 0.};
+    gradient_TH_32 = {0., 0., 0.};
+    gradient_TH_33 = {0., 0., 0.};
 
     gradient_TH[0][0] = gradient_TH_11;
     gradient_TH[0][1] = gradient_TH_12;
@@ -201,10 +223,18 @@ void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::Matrix
         }
     }
 
-	Eigen::MatrixXd R_tilde, R_bar;
+	Eigen::Matrix3d R_tilde, R_bar;
+	Eigen::Matrix3d sP_hat_3D = self.P_hat.block<3, 3>(0, 0);
+	Eigen::Matrix3d tP_hat_3D = T.P_hat.block<3, 3>(0, 0);
+	Eigen::Matrix3d ts = T.s.block<3, 3>(0, 0);
+	Eigen::Matrix3d weightedS_3D = weightedS.block<3, 3>(0, 0);
+	Eigen::Vector3d weightedY_3D = weightedY.segment(0, 3);
+	Eigen::Matrix3d fusedP_3D = fusedP.block<3, 3>(0, 0);
+	Eigen::Vector3d weightedXi_hat_3D = weightedXi_hat.segment(0, 3);
 
-	R_tilde				= R + self.H*self.P_hat*self.H.transpose();//R tilde
-	R_bar 				= R + T.H*T.P_hat*T.H.transpose();//R bar
+	R_tilde				= R + self.H.block<3, 3>(0, 0)*sP_hat_3D*self.H.block<3, 3>(0, 0).transpose();//R tilde
+	R_bar 				= R + T.H.block<3, 3>(0, 0)*tP_hat_3D*T.H.block<3, 3>(0, 0).transpose();//R bar
+	// ---------------------------------------------------ok line--------------------------------------------------- //
 
 	std::vector<std::vector<std::vector<double>>> gradient_RTilde(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
 	std::vector<std::vector<std::vector<double>>> gradient_RTilde_inv(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
@@ -213,41 +243,52 @@ void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::Matrix
 	std::vector<std::vector<std::vector<double>>> gradient_p(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
 	std::vector<std::vector<std::vector<double>>> gradient_pBreve_inv(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
 	std::vector<std::vector<std::vector<double>>> gradient_TH_trans(3, std::vector<std::vector<double>>(3, std::vector<double>(3)));
-	Eigen::MatrixXd gradient_x_breve(3, 3);
-	Eigen::MatrixXd gradient_x_hat(3, 3);
-	Eigen::MatrixXd gradient_weightedY(3, 3);
+	Eigen::Matrix3d gradient_x_breve;
+	Eigen::Matrix3d gradient_x_hat;
+	Eigen::Matrix3d gradient_weightedY;
 
-	// "gradient" means the partial derivate wrt prior pose of the agent(x_bar). 
+	// "gradient" means the partial derivate wrt prior pose of the agent(x_bar). //
 	gradient_TH_trans 	= mathLib.T_transpose(gradient_TH);
 
-	gradient_RTilde 	= mathLib.T_addition(mathLib.T_M_mutiply(gradient_H, (self.P_hat*self.H.transpose())), mathLib.M_T_mutiply((self.H*self.P_hat), mathLib.T_transpose(gradient_H)));//(17)
+	// std::cout << "gradient_TH_trans:" << std::endl;
+	// for (int i = 0; i < 3; ++i) {
+	// 	for (int j = 0; j < 3; ++j) {
+	// 		for (int k = 0; k < 3; ++k) {
+	// 			std::cout << "gradient_TH_trans[" << i << "][" << j << "][" << k << "] = " << gradient_TH_trans[i][j][k] << std::endl;
+	// 		}
+	// 	}
+	// }
+
+	gradient_RTilde 	= mathLib.T_addition(mathLib.T_M_mutiply(gradient_H, (sP_hat_3D*self.H.block<3, 3>(0, 0).transpose())), mathLib.M_T_mutiply((self.H.block<3, 3>(0, 0)*sP_hat_3D), mathLib.T_transpose(gradient_H)));//(17)
 
 	gradient_RTilde_inv = mathLib.T_M_mutiply(mathLib.M_T_mutiply(-R_bar.inverse(), gradient_RTilde), R_bar.inverse());//(16)
 
-	gradient_TetaTs 	= mathLib.cT(eta_ij, (mathLib.T_addition(mathLib.T_addition(mathLib.T_M_mutiply(gradient_TH_trans, R_tilde.inverse()*T.H) ,
-					 	  mathLib.T_M_mutiply(mathLib.M_T_mutiply(T.H.transpose(), gradient_RTilde_inv), T.H)) ,
-					 	  mathLib.M_T_mutiply(T.H.transpose()*R_tilde.inverse(), gradient_TH))));//(12) // eta_ij, from getEta_ij() in HEIF_target.
+	gradient_TetaTs 	= mathLib.cT(eta_ij, (mathLib.T_addition(mathLib.T_addition(mathLib.T_M_mutiply(gradient_TH_trans, R_tilde.inverse()*T.H.block<3, 3>(0, 0)) ,
+					 	  mathLib.T_M_mutiply(mathLib.M_T_mutiply(T.H.block<3, 3>(0, 0).transpose(), gradient_RTilde_inv), T.H.block<3, 3>(0, 0))) ,
+					 	  mathLib.M_T_mutiply(T.H.block<3, 3>(0, 0).transpose()*R_tilde.inverse(), gradient_TH))));//(12) // eta_ij, from getEta_ij() in HEIF_target.
 
-	gradient_pBreve 	= mathLib.T_M_mutiply(mathLib.M_T_mutiply(- T.s.inverse(), gradient_TetaTs), T.s.inverse());//(11)
+	gradient_pBreve 	= mathLib.T_M_mutiply(mathLib.M_T_mutiply(- ts.inverse(), gradient_TetaTs), ts.inverse());//(11)
 
-	gradient_p 			= mathLib.T_M_mutiply(mathLib.M_T_mutiply(fusedP*weightedS.inverse(), gradient_pBreve), weightedS.inverse()*fusedP);//(10)
+	gradient_p 			= mathLib.T_M_mutiply(mathLib.M_T_mutiply(fusedP_3D*weightedS_3D.inverse(), gradient_pBreve), weightedS_3D.inverse()*fusedP_3D);//(10)
 
-	gradient_pBreve_inv = mathLib.T_M_mutiply(mathLib.M_T_mutiply(- weightedS, gradient_pBreve), weightedS);//(18)
+	gradient_pBreve_inv = mathLib.T_M_mutiply(mathLib.M_T_mutiply(- weightedS_3D, gradient_pBreve), weightedS_3D);//(18)
 
-	gradient_weightedY 	= mathLib.T_V_mutiply(mathLib.T_M_mutiply(gradient_TH_trans, R_tilde.inverse()), (T.z-T.h+T.H*T.X_hat))+
-							mathLib.T_V_mutiply((mathLib.M_T_mutiply(T.H.transpose(), gradient_RTilde_inv)), (T.z-T.h+T.H*T.X_hat))+
-							T.H.transpose()*R_tilde.inverse()*mathLib.T_V_mutiply(gradient_TH, T.X_hat);//(19)
+	gradient_weightedY 	= mathLib.T_V_mutiply(mathLib.T_M_mutiply(gradient_TH_trans, R_tilde.inverse()), (T.z-T.h.segment(0, 3)+T.H.block<3, 3>(0, 0)*T.X_hat.segment(0, 3)))+
+							mathLib.T_V_mutiply((mathLib.M_T_mutiply(T.H.block<3, 3>(0, 0).transpose(), gradient_RTilde_inv)), (T.z-T.h.segment(0, 3)+T.H.block<3, 3>(0, 0)*T.X_hat.segment(0, 3)))+
+							T.H.block<3, 3>(0, 0).transpose()*R_tilde.inverse()*mathLib.T_V_mutiply(gradient_TH, T.X_hat.segment(0, 3));//(19)
 
-	gradient_x_breve	= mathLib.T_V_mutiply(gradient_pBreve, weightedY) + eta_ij*T.s.inverse()*gradient_weightedY;//(20)
+	gradient_x_breve	= mathLib.T_V_mutiply(gradient_pBreve, weightedY_3D) + eta_ij*ts.inverse()*gradient_weightedY;//(20)
 
-	gradient_x_hat		= mathLib.T_V_mutiply(gradient_p, (weightedXi_hat + weightedY)) +
-						  fusedP*mathLib.T_V_mutiply(gradient_pBreve_inv, (weightedS.inverse()*weightedY)) +
-						  fusedP*weightedS*gradient_x_breve;//(9) //weightedXi_hat = q_{T_ij}; //p_breve = weightedY.inverse(); //x_breve = weightedS.inverse()*weightedY;
+	gradient_x_hat		= mathLib.T_V_mutiply(gradient_p, (weightedXi_hat_3D + weightedY_3D)) +
+						  fusedP_3D*mathLib.T_V_mutiply(gradient_pBreve_inv, (weightedS_3D.inverse()*weightedY_3D)) +
+						  fusedP_3D*weightedS_3D*gradient_x_breve;//(9) //weightedXi_hat_3D = q_{T_ij}; //p_breve = weightedY_3D.inverse(); //x_breve = weightedS_3D.inverse()*weightedY_3D;
 
 	// Create meshgrid. --- //
 	Eigen::Vector2d grid_size(0.1, 0.1);
 	Eigen::Vector2d map_size(24., 24.);
-	Eigen::Vector2i size = (map_size.array() / grid_size.array()).cast<int>();
+	Eigen::Vector2i size;
+	size[0] = static_cast<int>(std::trunc(map_size[0] / grid_size[0]));
+	size[1] = static_cast<int>(std::trunc(map_size[1] / grid_size[1]));
 	Eigen::MatrixXd x_coords(size[0], size[1]);
 	Eigen::MatrixXd y_coords(size[0], size[1]);
 	for (int i = 0; i < size[0]; ++i) {
@@ -270,16 +311,14 @@ void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::Matrix
 	// --- Create meshgrid. //
 	
 	// pose: 3D -> 2D --- //
-	Eigen::MatrixXd weightedS_2D(2, 2);
-	Eigen::VectorXd X_hat_2D(2);
+	Eigen::Matrix2d weightedS_2D;
+	Eigen::Vector2d X_hat_2D;
 	Eigen::MatrixXd D_Lphi_x_hat(2, size[0]*size[1]);// (< dimention of vectors >, < numbers of q >)
-	std::vector<Eigen::MatrixXd> D_Lphi_p_breve(size[0]*size[1], Eigen::MatrixXd(2, 2)); // (< numbers of q >, <dimention of the matrices>)
-	weightedS_2D = mathLib.M_resize(weightedS, 2);
-	for (int i = 0; i < 2; ++i){
-		X_hat_2D(i) = T.X_hat(i);
-	}
-	Eigen::MatrixXd gradient_x_hat_2D(2, 2);
-	gradient_x_hat_2D = mathLib.M_resize(gradient_x_hat, gradient_x_hat_2D.size());
+	std::vector<Eigen::Matrix2d> D_Lphi_p_breve(size[0]*size[1], Eigen::Matrix2d::Zero()); // (< numbers of q >, <dimention of the matrices>)
+	weightedS_2D = weightedS.block<2, 2>(0, 0);
+	X_hat_2D = T.X_hat.segment(0, 2);
+	Eigen::Matrix2d gradient_x_hat_2D;
+	gradient_x_hat_2D = gradient_x_hat.block<2, 2>(0, 0);
 	// --- 3D -> 2D //
 
 	for (int i = 0; i < q.cols(); ++i){
@@ -287,8 +326,8 @@ void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::Matrix
     }
 	
     for (int i = 0; i < q.cols(); ++i) {
-        Eigen::VectorXd diff = q.col(i) - X_hat_2D;
-        D_Lphi_p_breve[i] = -0.5 * weightedS_2D + 0.5 * weightedS_2D * diff * diff.transpose() * weightedS_2D;// (21)
+        Eigen::VectorXd dist = q.col(i) - X_hat_2D;
+        D_Lphi_p_breve[i] = -0.5 * weightedS_2D + 0.5 * weightedS_2D * dist * dist.transpose() * weightedS_2D;// (21)
     }
 
 	Eigen::MatrixXd multi_vector_result1(2, size[0]*size[1]);
@@ -298,8 +337,13 @@ void target_EIF::computeGradientDensityFnc(Eigen::MatrixXd fusedP, Eigen::Matrix
 	multi_vector_result1 = mathLib.TensorContraction(D_Lphi_p_breve, gradient_pBreve);
 	multi_vector_result2 = gradient_x_hat_2D.transpose()*D_Lphi_x_hat;
 
+	// std::cout << "multi_vector_result1:\n" << multi_vector_result1 << std::endl;
+	// std::cout << "multi_vector_result2:\n" << multi_vector_result2 << std::endl;
+
 	Eigen::MatrixXd gradient2(2, size[0]*size[1]);
 	gradient2 = multi_vector_result1 + multi_vector_result2;// (7)
+
+	return gradient2;
 }
 
 void target_EIF::setFusionPairs(Eigen::MatrixXd fusedP, Eigen::VectorXd fusedX, double time)

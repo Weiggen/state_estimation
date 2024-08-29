@@ -204,10 +204,14 @@ int main(int argc, char **argv)
 			// }
 		// }
 
-//// Place the gradient function here.
-		teif.computeGradientDensityFnc(theif.getFusedCov(), theif.getWeightedS(), theif.getWeightedY(), theif.getWeightedXi_hat(), theif.getEta_ij());
-//// Publish to control.py
-		
+		// Compute density gradient & publish to /$(vehicle)_$(id)/densityGradient. //For coverageCtrl
+		Eigen::MatrixXd gradient_M(2, 240*240);
+		gradient_M.setZero();
+		gradient_M = teif.getGradientDensityFnc(theif.getFusedCov(), theif.getWeightedS(), theif.getWeightedY(), theif.getWeightedXi_hat(), theif.getEta_ij());
+		// std::cout << "gradient_M:\n" << gradient_M << std::endl;
+		// state_estimation::densityGradient gradient_ros;
+		// gradient_ros = eigen2densityGradient(gradient_M);
+		// eif_ros.densityGradient_pub.publish(gradient_ros);		
 
 		std::cout << "TEIF:\n";
 		eif_ros.tgtState_Plot_pub.publish(compare(gt_m.getGTs_eigen()[0], theif.getFusedState() , theif.getFusedCov(), gt_m.getGTorientation(ID)));

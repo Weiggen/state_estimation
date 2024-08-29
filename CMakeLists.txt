@@ -62,6 +62,7 @@ find_package(OsqpEigen REQUIRED)
   Int32MultiArrayStamped.msg  
   EIFpairStamped.msg
   Plot.msg
+  densityGradient.msg
  )
 
 ## Generate services in the 'srv' folder
